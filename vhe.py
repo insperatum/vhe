@@ -44,7 +44,7 @@ class NormalPrior(CustomDistribution):
 	def make(self, name):
 		module = self.F(name, self.size)
 		args = set()
-		return module, args
+		return Factor(module, name, args)
 
 class DataLoader():
 	VHEBatch = namedtuple("VHEBatch", ["inputs", "sizes", "target"])
@@ -91,29 +91,34 @@ class DataLoader():
 
 		return self.VHEBatch(target=x, inputs=inputs, sizes=sizes)
 
-class Factor(namedtuple('Factor', ['args', 'module'])):
+class Factor(namedtuple('Factor', ['module', 'name', 'args'])):
 	def __call__(self, *args, **kwargs):
 		return self.module.forward(*args, **kwargs)
 
+def createFactorFromModule(module):
+	assert 'forward' in dir(module)
+	spec = inspect.getargspec(module.forward)
+	assert spec.defaults == (None,)
+	name = spec.args[-1]
+	args = set([k for k in spec.args[1:-1] if k != "inputs"]) #Not self, name or inputs 
+	return Factor(module, name, args)
+	
 def Factors(**kwargs):
-	unordered_factors = {}
+	unordered_factors = []
 	for name, f in kwargs.items():
 		if isinstance(f, CustomDistribution):
-			module, args = f.make(name)
+			factor = f.make(name)
 		else:
-			module, args = f, None
-
-		assert 'forward' in dir(module)
-		if args is None: args = set([k for k in inspect.getargspec(module.forward).args[1:] 
-			if k != "inputs" and k != name])
-		unordered_factors[name] = Factor(args, module)
+			factor = createFactorFromModule(f)
+			assert factor.name == name 
+		unordered_factors.append(factor)
 
 	factors = OrderedDict()
 	try:
 		while len(unordered_factors)>0:
-			k = next(k for k,v in unordered_factors.items() if v.args <= set(factors.keys()))
-			factors[k] = unordered_factors[k]
-			del unordered_factors[k]
+			factor = next(f for f in unordered_factors if f.args <= set(factors.keys()))
+			factors[factor.name] = factor 
+			unordered_factors.remove(factor)
 	except StopIteration:
 		raise Exception("Can't make a tree out of factors: " + 
 				"".join("p(" + k + "|" + ",".join(v.args) + ")" for k,v in unordered_factors))
@@ -121,18 +126,23 @@ def Factors(**kwargs):
 	return factors
 
 class VHE(nn.Module):
-	def __init__(self, prior, encoder):
+	def __init__(self, encoder, decoder, prior=None):
 		super().__init__()
-		self.prior = prior
 		self.encoder = encoder
+		self.decoder = createFactorFromModule(decoder)
+		if prior is not None:
+			assert len(prior) == len(encoder) + 1
+			assert set(prior.keys()) == set(encoder.keys())
+			self.prior = prior
+		else:
+			self.prior = Factors(**{k:NormalPrior() for k in encoder.keys()})
 		self.modules = nn.ModuleList([x.module for x in self.prior.values()] + 
-									 [x.module for x in self.encoder.values()])
+									 [x.module for x in self.encoder.values()] +
+									 [self.decoder.module])
 	
-		assert len(prior) == len(encoder) + 1
-		assert set(list(prior.keys())[:-1]) == set(encoder.keys())
-		self.observation = list(prior.keys())[-1] 
-		self.latents = list(prior.keys())[:-1] 
-		self.Vars = namedtuple("Vars", prior.keys())
+		self.observation = self.decoder.name 
+		self.latents = list(self.prior.keys()) 
+		self.Vars = namedtuple("Vars", self.latents + [self.observation])
 		self.KL = namedtuple("KL", self.latents)
 
 	def score(self, inputs, sizes, return_kl=False, **kwargs):
@@ -156,9 +166,13 @@ class VHE(nn.Module):
 		# KL Divergence
 		kl = {k:sampled_scores[k]-priors[k] for k in self.latents}
 
-		# VHE Objective
-		score = priors[self.observation] - sum(kl[k]/sizes[k] for k in self.latents) 
+		# Log likelihood
+		args = {k:v for k,v in sampled_vars.items() if k==self.decoder.name or k in self.decoder.args}
+		x, ll = self.decoder(**args)
 
+		# VHE Objective
+		score = ll - sum(kl[k]/sizes[k] for k in self.latents) 
+		
 		if return_kl:
 			return score.mean(), self.KL(**{k:v.mean() for k,v in kl.items()})
 		else:
@@ -171,13 +185,8 @@ class VHE(nn.Module):
 			samplers = self.prior
 		else:
 			batch_size = list(inputs.values())[0][0].size(0) #First latent, first example 
-			samplers = {}
-			for k in self.prior.keys():
-				if k in inputs:
-					samplers[k] = self.encoder[k]
-				else:
-					samplers[k] = self.prior[k]
 			samplers = {k:self.encoder[k] if k in inputs else self.prior[k] for k in self.prior.keys()}
+			samplers[self.observation] = self.decoder
 
 		sampled_vars = {}
 		try:
