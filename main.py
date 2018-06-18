@@ -52,12 +52,15 @@ model_name = 'pcnn_lr:{:.5f}_nr-resnet{}_nr-filters{}'.format(args.lr, args.nr_r
 assert not os.path.exists(os.path.join('runs', model_name)), '{} already exists!'.format(model_name)
 
 sample_batch_size = 25
-obs = (1, 28, 28) if 'mnist' in args.dataset else (3, 32, 32)
+obs = (1, 28, 28) if 'mnist' in args.dataset or 'omni' in args.dataset else (3, 32, 32)
 input_channels = obs[0]
 rescaling     = lambda x : (x - .5) * 2.
 rescaling_inv = lambda x : .5 * x  + .5
+flip = lambda x : - x
 kwargs = {'num_workers':1, 'pin_memory':True, 'drop_last':True}
 ds_transforms = transforms.Compose([transforms.ToTensor(), rescaling])
+resizing = lambda x: x.resize((28,28))
+omni_transforms = transforms.Compose([resizing, transforms.ToTensor(), rescaling, flip])
 
 if 'mnist' in args.dataset : 
     train_loader = torch.utils.data.DataLoader(datasets.MNIST(args.data_dir, download=True, 
@@ -79,8 +82,23 @@ elif 'cifar' in args.dataset :
     
     loss_op   = lambda real, fake : discretized_mix_logistic_loss(real, fake)
     sample_op = lambda x : sample_from_discretized_mix_logistic(x, args.nr_logistic_mix)
+
+elif 'omni' in args.dataset :
+
+    train_loader = torch.utils.data.DataLoader(datasets.Omniglot(args.data_dir, download=True, 
+                        background=True, transform=omni_transforms), batch_size=args.batch_size, 
+                            shuffle=True, **kwargs)
+    
+    test_loader = torch.utils.data.DataLoader(datasets.Omniglot(args.data_dir, download=True, 
+                        background=False, transform=omni_transforms), batch_size=args.batch_size, 
+                            shuffle=True, **kwargs)
+    
+    loss_op   = lambda real, fake : discretized_mix_logistic_loss_1d(real, fake)
+    sample_op = lambda x : sample_from_discretized_mix_logistic_1d(x, args.nr_logistic_mix)
+
+
 else :
-    raise Exception('{} dataset not in {mnist, cifar10}'.format(args.dataset))
+    raise Exception('{} dataset not in {mnist, cifar10, omniglot}'.format(args.dataset))
 
 model = PixelCNN(nr_resnet=args.nr_resnet, nr_filters=args.nr_filters, 
             input_channels=input_channels, nr_logistic_mix=args.nr_logistic_mix)
