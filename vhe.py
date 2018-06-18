@@ -3,8 +3,10 @@ from builtins import super
 import inspect
 from collections import namedtuple, OrderedDict
 
-from torch import nn
-from torch import distributions
+import torch
+from torch import nn, distributions
+from torch.autograd import Variable
+import numpy as np
 
 def assert_msg(condition, message):
 	if not condition: raise Exception(message)
@@ -44,11 +46,56 @@ class NormalPrior(CustomDistribution):
 		args = set()
 		return module, args
 
+class DataLoader():
+	VHEBatch = namedtuple("VHEBatch", ["inputs", "sizes", "target"])
+	def __init__(self, data, batch_size, n_inputs=1, **kwargs):
+		self.data = data
+		self.labels = {}     # For each label type, a LongTensor assigning elements to labels
+		self.label_idxs = {} # For each label type, for each label, a list of indices
+		for k,v in kwargs.items():
+			unique_oldlabels = list(set(v))
+			map_label = {oldlabel:label for label, oldlabel in enumerate(unique_oldlabels)}
+			self.labels[k] = torch.LongTensor([map_label[oldlabel] for oldlabel in v])
+			self.label_idxs[k] = {}	
+			for i in range(len(unique_oldlabels)):
+				self.label_idxs[k][i] = (self.labels[k]==i).nonzero()[:,0]
+		self.batch_size = batch_size
+		self.n_inputs = n_inputs
+
+	def __iter__(self):
+		self.next_i = 0
+		self.x_idx = torch.randperm(len(self.data))
+		return self
+
+	def __next__(self):
+		return self.next()
+
+	def next(self):
+		if self.next_i+self.batch_size > len(self.data):
+			raise StopIteration()
+		else:
+			x_idx = self.x_idx[self.next_i:self.next_i+self.batch_size]
+			self.next_i += self.batch_size
+
+		labels = {k: torch.index_select(self.labels[k], 0, x_idx) for k in self.labels}
+		x = Variable(torch.index_select(self.data, 0, x_idx))
+		inputs = {}
+		sizes = {} 
+		for k,v in labels.items():
+			possibilities = [self.label_idxs[k][v[i].item()] for i in range(len(x_idx))]
+			sizes[k] = torch.Tensor([len(X) for X in possibilities])
+			input_idx = [np.random.choice(X, size=self.n_inputs) for X in possibilities]
+			inputs[k] = [
+				Variable(torch.index_select(self.data, 0, torch.LongTensor([I[j] for I in input_idx])))
+				for j in range(self.n_inputs)]
+
+		return self.VHEBatch(target=x, inputs=inputs, sizes=sizes)
+
 class Factor(namedtuple('Factor', ['args', 'module'])):
 	def __call__(self, *args, **kwargs):
 		return self.module.forward(*args, **kwargs)
 
-def factors(**kwargs):
+def Factors(**kwargs):
 	unordered_factors = {}
 	for name, f in kwargs.items():
 		if isinstance(f, CustomDistribution):
@@ -57,7 +104,8 @@ def factors(**kwargs):
 			module, args = f, None
 
 		assert 'forward' in dir(module)
-		if args is None: args = set([k for k in inspect.getargspec(module.forward).args[1:] if k != "inputs" and k != name])
+		if args is None: args = set([k for k in inspect.getargspec(module.forward).args[1:] 
+			if k != "inputs" and k != name])
 		unordered_factors[name] = Factor(args, module)
 
 	factors = OrderedDict()
@@ -67,9 +115,8 @@ def factors(**kwargs):
 			factors[k] = unordered_factors[k]
 			del unordered_factors[k]
 	except StopIteration:
-		print("Can't make a tree out of factors: " + 
+		raise Exception("Can't make a tree out of factors: " + 
 				"".join("p(" + k + "|" + ",".join(v.args) + ")" for k,v in unordered_factors))
-		raise Exception()
 
 	return factors
 
@@ -125,18 +172,13 @@ class VHE(nn.Module):
 		else:
 			batch_size = list(inputs.values())[0][0].size(0) #First latent, first example 
 			samplers = {}
-			dist_string = ""
 			for k in self.prior.keys():
 				if k in inputs:
 					samplers[k] = self.encoder[k]
-					dist_string += "q(" + k + ("|" if len(samplers[k].args)>0 else "") + ",".join(samplers[k].args) + ")"
 				else:
 					samplers[k] = self.prior[k]
-					dist_string += "p(" + k + ("|" if len(samplers[k].args)>0 else "") + ",".join(samplers[k].args) + ")"
-			samplers = {k:self.encoder[k] if k in inputs else self.prior[k]
-					for k in self.prior.keys()}
+			samplers = {k:self.encoder[k] if k in inputs else self.prior[k] for k in self.prior.keys()}
 
-		print("Sampling", dist_string)
 		sampled_vars = {}
 		try:
 			while len(samplers) > 0:
@@ -148,7 +190,6 @@ class VHE(nn.Module):
 				sampled_vars[k], score = samplers[k](**kwargs)
 				del samplers[k]
 		except StopIteration:
-			print("Can't find a valid sampling path")
-			raise Exception()
+			raise Exception("Can't find a valid sampling path")
 
 		return self.Vars(**sampled_vars)

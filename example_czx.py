@@ -1,13 +1,11 @@
 from builtins import super
 import random
-import numpy as np
 
 import torch
 from torch import nn, optim
-from torch.autograd import Variable
 from torch.distributions.normal import Normal
 
-from vhe import VHE, NormalPrior, factors
+from vhe import VHE, DataLoader, NormalPrior, Factors
 
 
 # Model
@@ -51,53 +49,44 @@ class Qz(nn.Module):
 		self.sigma_z = nn.Sequential(nn.Linear(x_dim, z_dim), nn.Softplus())
 
 	def forward(self, inputs, c, z=None):	
-		mu_z = self.mu_z(x)
-		sigma_z = self.sigma_z(x)
+		mu_z = self.mu_z(inputs[0])
+		sigma_z = self.sigma_z(inputs[0])
 		dist = Normal(mu_z, sigma_z)
 		if z is None: z = dist.rsample()
 		return z, dist.log_prob(z).sum(dim=1)
 
-prior = factors(c=NormalPrior(), z=NormalPrior(), x=Px())
-encoder = factors(c=Qc(), z=Qz())
+prior = Factors(c=NormalPrior(), z=NormalPrior(), x=Px())
+encoder = Factors(c=Qc(), z=Qz())
 vhe = VHE(prior, encoder)
 
 # Generate dataset
 n = 0
 classes = []
-class_idxs = []
-for i in range(100):
+for i in range(1000):
 	mu = torch.randn(1, x_dim)
 	sigma = 0.1
 	class_size = random.randint(10,20)
 	classes.append(mu + sigma*torch.randn(class_size, x_dim))
-	class_idxs.append(list(range(n, n+class_size)))
-	n += class_size
 data = torch.cat(classes)
+class_labels = [i for i in range(len(classes)) for j in range(len(classes[i]))] 
 
-def makeBatch(batch_size, n_inputs):
-	classes = np.random.choice(range(len(class_idxs)), size=batch_size, p=[len(x)/n for x in class_idxs])
-	elems = [np.random.choice(class_idxs[j], size=n_inputs+1) for j in classes]
-	x_idx = torch.LongTensor([e[0] for e in elems])
-	D_idx = [torch.LongTensor([e[k] for e in elems]) for k in range(1, n_inputs+1)]
-	x = Variable(torch.index_select(data, 0, x_idx))
-	D = [Variable(torch.index_select(data, 0, d_idx)) for d_idx in D_idx]
-	return D, x
 
 # Training
 batch_size = 100
 n_inputs = 1
+data_loader = DataLoader(data=data, c=class_labels, z=range(len(data)),
+		batch_size=batch_size, n_inputs=n_inputs)
 
+
+# Training
 optimiser = optim.Adam(vhe.parameters(), lr=1e-3)
-for i in range(1000):
-	optimiser.zero_grad()
-	D, x = makeBatch(batch_size, n_inputs)
-	score, kl = vhe.score(inputs = {"c":D, "z":[x]},
-					  sizes = {"c":100, "z":1},
-					  x=x,
-					  return_kl=True)
-	(-score).backward()
-	optimiser.step()
-	if i%100==0: print("Iteration %d Score %3.3f KLc %3.3f KLz %3.3f" % (i, score.item(), kl.c.item(), kl.z.item()))
+for epoch in range(1,11):
+	for batch in data_loader:
+		optimiser.zero_grad()
+		score, kl = vhe.score(inputs=batch.inputs, sizes=batch.sizes, x=batch.target, return_kl=True)
+		(-score).backward()
+		optimiser.step()
+	print("Epoch %d Score %3.3f KLc %3.3f KLz %3.3f" % (epoch, score.item(), kl.c.item(), kl.z.item()))
 
 for mu in [-1, 0, 1]:
 	test_D = [mu + 0.1*torch.randn(1,x_dim) for _ in range(n_inputs)]
