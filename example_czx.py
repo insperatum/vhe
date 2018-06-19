@@ -5,7 +5,7 @@ import torch
 from torch import nn, optim
 from torch.distributions.normal import Normal
 
-from vhe import VHE, DataLoader, NormalPrior, Factors
+from vhe import VHE, DataLoader, Factors
 
 
 # Model
@@ -55,9 +55,9 @@ class Qz(nn.Module):
 		if z is None: z = dist.rsample()
 		return z, dist.log_prob(z).sum(dim=1)
 
-prior = Factors(c=NormalPrior(), z=NormalPrior(), x=Px())
 encoder = Factors(c=Qc(), z=Qz())
-vhe = VHE(prior, encoder)
+decoder = Px()
+vhe = VHE(encoder, decoder)
 
 # Generate dataset
 n = 0
