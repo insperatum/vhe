@@ -5,7 +5,7 @@ import torch
 from torch import nn, optim
 from torch.distributions.normal import Normal
 
-from vhe import VHE, DataLoader, Factors
+from vhe import VHE, DataLoader, Factors, Result
 
 
 # Model
@@ -24,7 +24,7 @@ class Px(nn.Module):
 		cz = torch.cat([c,z], dim=1)
 		dist = Normal(self.mu(cz), self.sigma(cz))
 		if x is None: x = dist.rsample()
-		return x, dist.log_prob(x).sum(dim=1)
+		return Result(x, dist.log_prob(x).sum(dim=1))
 
 class Qc(nn.Module):
 	def __init__(self):
@@ -40,7 +40,7 @@ class Qc(nn.Module):
 		sigma_c = self.sigma_c(mean_embedding)
 		dist = Normal(mu_c, sigma_c)
 		if c is None: c = dist.rsample()
-		return c, dist.log_prob(c).sum(dim=1)
+		return Result(c, dist.log_prob(c).sum(dim=1))
 
 class Qz(nn.Module):
 	def __init__(self):
@@ -53,7 +53,7 @@ class Qz(nn.Module):
 		sigma_z = self.sigma_z(inputs[0])
 		dist = Normal(mu_z, sigma_z)
 		if z is None: z = dist.rsample()
-		return z, dist.log_prob(z).sum(dim=1)
+		return Result(z, dist.log_prob(z).sum(dim=1))
 
 encoder = Factors(c=Qc(), z=Qz())
 decoder = Px()

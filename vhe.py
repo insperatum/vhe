@@ -31,12 +31,12 @@ class NormalPrior(CustomDistribution):
 					self.size = list(x.size()[1:])
 					self.t = x.new_zeros(1,1)
 				batch_size = x.size(0)
-				return kwargs[self.name], self.norm.log_prob(x).view(batch_size,-1).sum(dim=1)
+				return Result(kwargs[self.name], self.norm.log_prob(x).view(batch_size,-1).sum(dim=1))
 			else:
 				size = [batch_size] + self.size
 				dist = distributions.normal.Normal(self.t.new_zeros(size), self.t.new_ones(size))
 				x = dist.rsample()
-				return x, dist.log_prob(x)
+				return Result(x, dist.log_prob(x))
 	
 	def __init__(self, sizes=None):
 		self.size = None
@@ -46,6 +46,14 @@ class NormalPrior(CustomDistribution):
 		args = set()
 		return Factor(module, name, args)
 
+class Result:
+	def __init__(self, value, reparam_log_prob, reinforce_log_prob=None):
+		self.value = value
+		self.reparam_log_prob = reparam_log_prob
+		self.reinforce_log_prob = reinforce_log_prob
+		self.log_prob = self.reparam_log_prob
+		if self.reinforce_log_prob is not None: self.log_prob += self.reinforce_log_prob
+		
 class DataLoader():
 	VHEBatch = namedtuple("VHEBatch", ["inputs", "sizes", "target"])
 	def __init__(self, data, batch_size, n_inputs=1, **kwargs):
@@ -103,27 +111,34 @@ def createFactorFromModule(module):
 	args = set([k for k in spec.args[1:-1] if k != "inputs"]) #Not self, name or inputs 
 	return Factor(module, name, args)
 	
-def Factors(**kwargs):
-	unordered_factors = []
-	for name, f in kwargs.items():
-		if isinstance(f, CustomDistribution):
-			factor = f.make(name)
-		else:
-			factor = createFactorFromModule(f)
-			assert factor.name == name 
-		unordered_factors.append(factor)
+class Factors:
+	def __init__(self, **kwargs):
+		unordered_factors = []
+		for name, f in kwargs.items():
+			if isinstance(f, CustomDistribution):
+				factor = f.make(name)
+			else:
+				factor = createFactorFromModule(f)
+				assert factor.name == name 
+			unordered_factors.append(factor)
 
-	factors = OrderedDict()
-	try:
-		while len(unordered_factors)>0:
-			factor = next(f for f in unordered_factors if f.args <= set(factors.keys()))
-			factors[factor.name] = factor 
-			unordered_factors.remove(factor)
-	except StopIteration:
-		raise Exception("Can't make a tree out of factors: " + 
-				"".join("p(" + k + "|" + ",".join(v.args) + ")" for k,v in unordered_factors))
+		factors = OrderedDict()
+		dependencies = {}
+		try:
+			while len(unordered_factors)>0:
+				factor = next(f for f in unordered_factors if f.args <= set(factors.keys()))
+				factors[factor.name] = factor 
+				dependencies[factor.name] = factor.args | \
+						set([k for f2 in factor.args for k in dependencies[f2]])
+				unordered_factors.remove(factor)
+		except StopIteration:
+			raise Exception("Can't make a tree out of factors: " + 
+					"".join("p(" + k + "|" + ",".join(v.args) + ")" for k,v in unordered_factors))
 
-	return factors
+		self.factors = factors
+		self.dependencies = dependencies
+		self.variables = list(self.factors.keys())
+		self.modules = list(f.module for f in self.factors.values())
 
 class VHE(nn.Module):
 	def __init__(self, encoder, decoder, prior=None):
@@ -131,52 +146,58 @@ class VHE(nn.Module):
 		self.encoder = encoder
 		self.decoder = createFactorFromModule(decoder)
 		if prior is not None:
-			assert len(prior) == len(encoder) + 1
-			assert set(prior.keys()) == set(encoder.keys())
+			assert len(prior.factors) == len(encoder.factors) + 1
+			assert set(prior.variables) == set(encoder.variables)
 			self.prior = prior
 		else:
-			self.prior = Factors(**{k:NormalPrior() for k in encoder.keys()})
-		self.modules = nn.ModuleList([x.module for x in self.prior.values()] + 
-									 [x.module for x in self.encoder.values()] +
-									 [self.decoder.module])
+			self.prior = Factors(**{k:NormalPrior() for k in encoder.variables})
+		self.modules = nn.ModuleList(self.prior.modules + self.encoder.modules + [self.decoder.module])
 	
 		self.observation = self.decoder.name 
-		self.latents = list(self.prior.keys()) 
+		self.latents = self.prior.variables 
 		self.Vars = namedtuple("Vars", self.latents + [self.observation])
 		self.KL = namedtuple("KL", self.latents)
 
 	def score(self, inputs, sizes, return_kl=False, **kwargs):
-		assert set(inputs.keys()) == set(self.encoder.keys())
+		assert set(inputs.keys()) == set(self.latents)
 		assert set(sizes.keys()) == set(self.latents)
 		assert set(kwargs.keys()) == set([self.observation])
 
 		# Sample from encoder
 		sampled_vars = {}
-		sampled_scores = {}
-		for k, factor in self.encoder.items():
-			sampled_vars[k], sampled_scores[k] = factor(inputs=inputs[k], **sampled_vars)
+		sampled_log_probs = {}
+		sampled_reinforce_log_probs = {}
+		for k, factor in self.encoder.factors.items():
+			result = factor(inputs=inputs[k], **sampled_vars)
+			sampled_vars[k], sampled_log_probs[k] = result.value, result.log_prob
+			if result.reinforce_log_prob is not None: sampled_reinforce_log_probs[k] = result.reinforce_log_prob
 		sampled_vars[self.observation] = kwargs[self.observation]
 
 		# Score under prior
 		priors = {}
-		for k, factor in self.prior.items():
+		for k, factor in self.prior.factors.items():
 			args = {k2:v for k2,v in sampled_vars.items() if k2==k or k2 in factor.args}
-			_, priors[k] = factor(**args)
+			priors[k] = factor(**args).log_prob
 
 		# KL Divergence
-		kl = {k:sampled_scores[k]-priors[k] for k in self.latents}
+		kl = {k:sampled_log_probs[k]-priors[k] for k in self.latents}
 
 		# Log likelihood
 		args = {k:v for k,v in sampled_vars.items() if k==self.decoder.name or k in self.decoder.args}
-		x, ll = self.decoder(**args)
+		ll = self.decoder(**args).log_prob
 
 		# VHE Objective
-		score = ll - sum(kl[k]/sizes[k] for k in self.latents) 
-		
+		lowerbound = ll - sum(kl[k]/sizes[k] for k in self.latents) 
+
+		# Reinforce objective
+		objective = lowerbound
+		for k,v in sampled_reinforce_log_probs.items():
+			objective += v * (ll - sum(kl[k]/sizes[k] for k2 in self.latents if k in self.dependencies[k2])).data
+
 		if return_kl:
-			return score.mean(), self.KL(**{k:v.mean() for k,v in kl.items()})
+			return objective.mean(), self.KL(**{k:v.mean() for k,v in kl.items()})
 		else:
-			return score.mean()
+			return objective.mean()
 
 	def sample(self, inputs=None, batch_size=None):
 		assert (inputs is None) != (batch_size is None)
@@ -185,7 +206,7 @@ class VHE(nn.Module):
 			samplers = self.prior
 		else:
 			batch_size = list(inputs.values())[0][0].size(0) #First latent, first example 
-			samplers = {k:self.encoder[k] if k in inputs else self.prior[k] for k in self.prior.keys()}
+			samplers = {k:self.encoder.factors[k] if k in inputs else self.prior.factors[k] for k in self.latents}
 			samplers[self.observation] = self.decoder
 
 		sampled_vars = {}
@@ -195,8 +216,7 @@ class VHE(nn.Module):
 				kwargs = {k2:sampled_vars[k2] for k2 in samplers[k].args}
 				if k in inputs: kwargs['inputs'] = inputs[k]
 				if len(kwargs)==0: kwargs['batch_size'] = batch_size
-
-				sampled_vars[k], score = samplers[k](**kwargs)
+				sampled_vars[k] = samplers[k](**kwargs).value
 				del samplers[k]
 		except StopIteration:
 			raise Exception("Can't find a valid sampling path")
