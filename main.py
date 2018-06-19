@@ -96,7 +96,6 @@ elif 'omni' in args.dataset :
     loss_op   = lambda real, fake : discretized_mix_logistic_loss_1d(real, fake) #use binary cross-entropy loss
     sample_op = lambda x : sample_from_discretized_mix_logistic_1d(x, args.nr_logistic_mix) #sample bernoulli or whatev
 
-
 else :
     raise Exception('{} dataset not in {mnist, cifar10, omniglot}'.format(args.dataset))
 
@@ -135,7 +134,7 @@ for epoch in range(args.max_epochs):
     for batch_idx, (input,_) in enumerate(train_loader):
         input = input.cuda(async=True)
         input = Variable(input)
-        output = model(input)
+        output = model(input) #output is a distribution
         loss = loss_op(input, output)
         optimizer.zero_grad()
         loss.backward()
