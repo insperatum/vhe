@@ -156,6 +156,7 @@ for epoch in range(args.max_epochs):
         loss = loss_op(input, output)
         optimizer.zero_grad()
         loss.backward()
+        new_loss = loss / args.batch_size
         optimizer.step()
         train_loss += loss.data[0]
         if (batch_idx +1) % args.print_every == 0 : 
@@ -163,6 +164,7 @@ for epoch in range(args.max_epochs):
             print('loss : {:.4f}, time : {:.4f}'.format(
                 (train_loss / deno), 
                 (time.time() - time_)))
+
             train_loss = 0.
             writes += 1
             time_ = time.time()
