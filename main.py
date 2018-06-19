@@ -93,8 +93,8 @@ elif 'omni' in args.dataset :
                         background=False, transform=omni_transforms), batch_size=args.batch_size, 
                             shuffle=True, **kwargs)
     
-    loss_op   = lambda real, fake : discretized_mix_logistic_loss_1d(real, fake)
-    sample_op = lambda x : sample_from_discretized_mix_logistic_1d(x, args.nr_logistic_mix)
+    loss_op   = lambda real, fake : discretized_mix_logistic_loss_1d(real, fake) #use binary cross-entropy loss
+    sample_op = lambda x : sample_from_discretized_mix_logistic_1d(x, args.nr_logistic_mix) #sample bernoulli or whatev
 
 
 else :
