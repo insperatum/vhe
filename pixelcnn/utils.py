@@ -22,14 +22,12 @@ def log_sum_exp(x):
     m2, _ = torch.max(x, dim=axis, keepdim=True)
     return m + torch.log(torch.sum(torch.exp(x - m2), dim=axis))
 
-
 def log_prob_from_logits(x):
     """ numerically stable log_softmax implementation that prevents overflow """
     # TF ordering
     axis = len(x.size()) - 1
     m, _ = torch.max(x, dim=axis, keepdim=True)
     return x - m - torch.log(torch.sum(torch.exp(x - m), dim=axis, keepdim=True))
-
 
 def discretized_mix_logistic_loss(x, l):
     """ log-likelihood for mixture of discretized logistics, assumes the data has been rescaled to [-1,1] interval """
@@ -264,3 +262,43 @@ def load_part_of_model(model, path):
                 print(e)
                 pass
     print('added %s of params:' % (added / float(len(model.state_dict().keys()))))
+
+
+
+
+
+
+def softmax_loss_1d(x, l):
+    """ log-likelihood for mixture of discretized logistics, assumes the data has been rescaled to [-1,1] interval """
+    x = x[:, 0, :, :]
+    ls = [int(y) for y in l.size()]
+    
+    nr_softmax_bins = ls[1]
+    x_quant = ((x+1)*nr_softmax_bins/2).long().clamp(max=nr_softmax_bins-1)
+    loss = F.cross_entropy(l, x_quant, size_average=False)
+
+    return loss
+
+
+def sample_from_softmax_1d(l):
+    # Pytorch ordering
+    l = l.permute(0, 2, 3, 1)
+    ls = [int(y) for y in l.size()]
+    nr_softmax_bins = ls[-1]
+    xs = ls[:-1] + [1] #[3]
+
+    # unpack parameters
+    logit_probs = l
+    l = l.contiguous().view(xs + [nr_softmax_bins])
+
+    # sample mixture indicator from softmax
+    temp = torch.FloatTensor(logit_probs.size())
+    if l.is_cuda : temp = temp.cuda()
+    temp.uniform_(1e-5, 1. - 1e-5)
+    temp = logit_probs.data - torch.log(- torch.log(temp))
+    _, argmax = temp.max(dim=3)
+   
+    
+    x0 = argmax.float()*2/(nr_softmax_bins-1) - 1
+    out = x0.unsqueeze(1)
+    return out
