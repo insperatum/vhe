@@ -30,8 +30,10 @@ parser.add_argument('-q', '--nr_resnet', type=int, default=5,
                     help='Number of residual blocks per stage of the model')
 parser.add_argument('-n', '--nr_filters', type=int, default=160,
                     help='Number of filters to use across the model. Higher = larger model.')
-parser.add_argument('-m', '--nr_logistic_mix', type=int, default=10,
+parser.add_argument('-m', '--nr_logistic_mix', type=int, default=None,
                     help='Number of logistic components in the mixture. Higher = more flexible model')
+parser.add_argument('-sm', '--nr_softmax_bins', type=int, default=None,
+                    help='Number of softmax bins (use instead of nr_logistic_mix)')
 parser.add_argument('-l', '--lr', type=float,
                     default=0.0002, help='Base learning rate')
 parser.add_argument('-e', '--lr_decay', type=float, default=0.999995,
@@ -43,6 +45,9 @@ parser.add_argument('-x', '--max_epochs', type=int,
 parser.add_argument('-s', '--seed', type=int, default=1,
                     help='Random seed to use')
 args = parser.parse_args()
+
+if args.nr_logistic_mix is None and args.nr_softmax_bins is None:
+	args.nr_logistic_mix = 10
 
 # reproducibility
 torch.manual_seed(args.seed)
@@ -70,8 +75,13 @@ if 'mnist' in args.dataset :
     test_loader  = torch.utils.data.DataLoader(datasets.MNIST(args.data_dir, train=False, 
                     transform=ds_transforms), batch_size=args.batch_size, shuffle=True, **kwargs)
     
-    loss_op   = lambda real, fake : discretized_mix_logistic_loss_1d(real, fake)
-    sample_op = lambda x : sample_from_discretized_mix_logistic_1d(x, args.nr_logistic_mix)
+    if args.nr_logistic_mix:
+        loss_op   = lambda real, fake : discretized_mix_logistic_loss_1d(real, fake)
+        sample_op = lambda x : sample_from_discretized_mix_logistic_1d(x, args.nr_logistic_mix)
+    else:
+        loss_op   = lambda real, fake : softmax_loss_1d(real, fake)
+        sample_op = lambda x : sample_from_softmax_1d(x)
+
 
 elif 'cifar' in args.dataset : 
     train_loader = torch.utils.data.DataLoader(datasets.CIFAR10(args.data_dir, train=True, 
@@ -80,8 +90,11 @@ elif 'cifar' in args.dataset :
     test_loader  = torch.utils.data.DataLoader(datasets.CIFAR10(args.data_dir, train=False, 
                     transform=ds_transforms), batch_size=args.batch_size, shuffle=True, **kwargs)
     
-    loss_op   = lambda real, fake : discretized_mix_logistic_loss(real, fake)
-    sample_op = lambda x : sample_from_discretized_mix_logistic(x, args.nr_logistic_mix)
+    if args.nr_logistic_mix:
+        loss_op   = lambda real, fake : discretized_mix_logistic_loss(real, fake)
+        sample_op = lambda x : sample_from_discretized_mix_logistic(x, args.nr_logistic_mix)
+    else:
+        raise NotImplementedError("No 3D Softmax")
 
 elif 'omni' in args.dataset :
 
@@ -92,16 +105,21 @@ elif 'omni' in args.dataset :
     test_loader = torch.utils.data.DataLoader(datasets.Omniglot(args.data_dir, download=True, 
                         background=False, transform=omni_transforms), batch_size=args.batch_size, 
                             shuffle=True, **kwargs)
-    
-    loss_op   = lambda real, fake : discretized_mix_logistic_loss_1d(real, fake)
-    sample_op = lambda x : sample_from_discretized_mix_logistic_1d(x, args.nr_logistic_mix)
+
+    if args.nr_logistic_mix:
+        loss_op   = lambda real, fake : discretized_mix_logistic_loss_1d(real, fake)
+        sample_op = lambda x : sample_from_discretized_mix_logistic_1d(x, args.nr_logistic_mix)
+    else:
+        loss_op   = lambda real, fake : softmax_loss_1d(real, fake)
+        sample_op = lambda x : sample_from_softmax_1d(x)
 
 
 else :
     raise Exception('{} dataset not in {mnist, cifar10, omniglot}'.format(args.dataset))
 
 model = PixelCNN(nr_resnet=args.nr_resnet, nr_filters=args.nr_filters, 
-            input_channels=input_channels, nr_logistic_mix=args.nr_logistic_mix)
+            input_channels=input_channels, nr_logistic_mix=args.nr_logistic_mix,
+			nr_softmax_bins=args.nr_softmax_bins)
 model = model.cuda()
 
 if args.load_params:
