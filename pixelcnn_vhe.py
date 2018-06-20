@@ -243,25 +243,24 @@ class Qz(nn.Module):
 		
 		#new:
 		self.localization_mu = nn.Sequential(
-				nn.Conv2d(1, 8, kernel_size=7),
+				nn.Conv2d(1, 8, kernel_size=7, stride=1),
 				nn.MaxPool2d(2, stride=2),
 				nn.ReLU(True),
-				nn.Conv2d(8, 10, kernel_size=5),
+				nn.Conv2d(8, 10, kernel_size=5, stride=1),
 				nn.MaxPool2d(2, stride=2),
 				)
 
 		self.localization_sigma = nn.Sequential(
-				nn.Conv2d(1, 8, kernel_size=7),
+				nn.Conv2d(1, 8, kernel_size=7, stride=1),
 				nn.MaxPool2d(2, stride=2),
 				nn.ReLU(True),
-				nn.Conv2d(8, 10, kernel_size=5),
+				nn.Conv2d(8, 10, kernel_size=5, stride=1),
 				nn.MaxPool2d(2, stride=2),
 				nn.ReLU()
 				)
 
 	def forward(self, inputs, c, z=None):
-		print(inputs)
-		print(len(inputs))
+		print("inputs size", inputs.size())
 
 		mu = self.localization_mu(inputs)
 		sigma = self.localization_sigma(inputs)
@@ -299,6 +298,7 @@ class_labels = [i for i in range(len(classes)) for j in range(len(classes[i]))]
 
 data, class_labels = zip(*[[img, label] for img, label in train_loader]) 
 print("after zip")
+
 data_cutoff = 200	
 data = torch.cat(data[:data_cutoff])
 class_labels = class_labels[:data_cutoff]
@@ -309,8 +309,12 @@ print("class_labels",class_labels[0])
 # Training
 batch_size = args.batch_size
 n_inputs = 2
-data_loader = DataLoader(data=data, c=class_labels, z=range(len(data)),
-		batch_size=batch_size, n_inputs=n_inputs)
+#data_loader = DataLoader(data=data, c=class_labels, z=range(len(data)),
+#		batch_size=batch_size, n_inputs=n_inputs)
+
+data_loader = DataLoader(data=data, labels = {'c':class_labels, 'z':range(len(data))},
+		batch_size=batch_size, k_shot= {'c': n_inputs, 'z':1} )
+
 ############bat
 
 
@@ -323,7 +327,7 @@ scheduler = lr_scheduler.StepLR(optimiser, step_size=1, gamma=args.lr_decay)
 for epoch in range(1,11):
 	batchnum = 0
 	for batch in data_loader:
-		inputs = {k:[item.cuda() for item in v]for k,v in batch.inputs.items()}
+		inputs = {k:v.cuda() for k,v in batch.inputs.items()}
 
 		sizes = {k:v.cuda() for k,v in batch.sizes.items()}
 		target = batch.target.cuda()
