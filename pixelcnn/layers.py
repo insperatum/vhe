@@ -131,13 +131,18 @@ class gated_resnet(nn.Module):
         self.conv_out = conv_op(2 * num_filters, 2 * num_filters)
 
 
-    def forward(self, og_x, a=None):
+    def forward(self, og_x, a=None, cond_blocks=None):
         x = self.conv_input(self.nonlinearity(og_x))
         if a is not None : 
             x += self.nin_skip(self.nonlinearity(a))
         x = self.nonlinearity(x)
         x = self.dropout(x)
         x = self.conv_out(x)
+
+        if cond_blocks is not None:
+            conditioning_block = cond_blocks[(x.size(2), x.size(3))]
+            x += conditioning_block
+
         a, b = torch.chunk(x, 2, dim=1)
         c3 = a * F.sigmoid(b)
         return og_x + c3

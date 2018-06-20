@@ -20,7 +20,7 @@ class NormalPrior(CustomDistribution):
 			super().__init__()
 			self.name = name
 			self.size = size
-			self.norm = distributions.normal.Normal(0,1)
+			self.norm = distributions.normal.Normal(torch.Tensor([0]).cuda(),torch.Tensor([1]).cuda())
 
 		def forward(self, batch_size=None, **kwargs):
 			assert (batch_size != None) != (self.name in kwargs)
@@ -31,6 +31,8 @@ class NormalPrior(CustomDistribution):
 					self.size = list(x.size()[1:])
 					self.t = x.new_zeros(1,1)
 				batch_size = x.size(0)
+				#print(x)
+				#print(self.norm.log_prob(x))
 				return kwargs[self.name], self.norm.log_prob(x).view(batch_size,-1).sum(dim=1)
 			else:
 				size = [batch_size] + self.size
@@ -78,6 +80,7 @@ class DataLoader():
 			self.next_i += self.batch_size
 
 		labels = {k: torch.index_select(self.labels[k], 0, x_idx) for k in self.labels}
+
 		x = Variable(torch.index_select(self.data, 0, x_idx))
 		inputs = {}
 		sizes = {} 
@@ -127,7 +130,7 @@ def Factors(**kwargs):
 
 class VHE(nn.Module):
 	def __init__(self, encoder, decoder, prior=None):
-		super().__init__()
+		super(VHE,self).__init__()
 		self.encoder = encoder
 		self.decoder = createFactorFromModule(decoder)
 		if prior is not None:
