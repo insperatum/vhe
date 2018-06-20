@@ -259,8 +259,10 @@ class Qz(nn.Module):
 				nn.ReLU()
 				)
 
-	def forward(self, inputs, z=None):
-		assert len(inputs) == 1
+	def forward(self, inputs, c, z=None):
+		print(inputs)
+		print(len(inputs))
+
 		mu = self.localization_mu(inputs)
 		sigma = self.localization_sigma(inputs)
 
@@ -296,16 +298,17 @@ class_labels = [i for i in range(len(classes)) for j in range(len(classes[i]))]
 """
 
 data, class_labels = zip(*[[img, label] for img, label in train_loader]) 
-
-data = torch.cat(data)
-
+print("after zip")
+data_cutoff = 200	
+data = torch.cat(data[:data_cutoff])
+class_labels = class_labels[:data_cutoff]
 #class_labels = class_labels
 print("data shape", data.shape)
 print("class_labels",class_labels[0])
 
 # Training
 batch_size = args.batch_size
-n_inputs = 4
+n_inputs = 2
 data_loader = DataLoader(data=data, c=class_labels, z=range(len(data)),
 		batch_size=batch_size, n_inputs=n_inputs)
 ############bat

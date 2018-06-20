@@ -58,6 +58,7 @@ class DataLoader():
     def __init__(self, data, batch_size, n_inputs=1, **kwargs):
         self.data = data
         self.mode = "tensor" if torch.is_tensor(data) else "list"
+        print("mode print:", self.mode)
         if self.mode == "tensor":
             self.select_data = lambda x_idx: torch.index_select(self.data, 0, x_idx)
         else:
@@ -178,7 +179,8 @@ class VHE(nn.Module):
         sampled_log_probs = {}
         sampled_reinforce_log_probs = {}
         for k, factor in self.encoder.factors.items():
-            result = factor(inputs=inputs[k], **{k:v for k,v in sampled_vars.items() if k in factor.variables})
+            result = factor(inputs=inputs[k], **sampled_vars)
+            #result = factor(inputs=inputs[k], **{k:v for k,v in sampled_vars.items() if k in factor.variables})
             sampled_vars[k], sampled_log_probs[k] = result.value, result.log_prob
             if result.reinforce_log_prob is not None: sampled_reinforce_log_probs[k] = result.reinforce_log_prob
         sampled_vars[self.observation] = kwargs[self.observation]
