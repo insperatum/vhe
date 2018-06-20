@@ -30,7 +30,7 @@ parser.add_argument('-i', '--data_dir', type=str,
 parser.add_argument('-o', '--save_dir', type=str, default='models',
                     help='Location for parameter checkpoints and samples')
 parser.add_argument('-d', '--dataset', type=str,
-                    default='mnist', help='Can be either cifar|mnist|omni')
+                    default='mnist', help='Can be either cifar|mnist')
 parser.add_argument('-p', '--print_every', type=int, default=50,
                     help='how many iterations between print statements')
 parser.add_argument('-t', '--save_interval', type=int, default=10,
@@ -38,9 +38,9 @@ parser.add_argument('-t', '--save_interval', type=int, default=10,
 parser.add_argument('-r', '--load_params', type=str, default=None,
                     help='Restore training from previous model checkpoint?')
 # model
-parser.add_argument('-q', '--nr_resnet', type=int, default=3,
+parser.add_argument('-q', '--nr_resnet', type=int, default=5,
                     help='Number of residual blocks per stage of the model')
-parser.add_argument('-n', '--nr_filters', type=int, default=80,
+parser.add_argument('-n', '--nr_filters', type=int, default=160,
                     help='Number of filters to use across the model. Higher = larger model.')
 parser.add_argument('-m', '--nr_logistic_mix', type=int, default=None,
                     help='Number of logistic components in the mixture. Higher = more flexible model')
@@ -50,7 +50,7 @@ parser.add_argument('-l', '--lr', type=float,
                     default=0.0002, help='Base learning rate')
 parser.add_argument('-e', '--lr_decay', type=float, default=0.999995,
                     help='Learning rate decay, applied every step of the optimization')
-parser.add_argument('-b', '--batch_size', type=int, default=12,
+parser.add_argument('-b', '--batch_size', type=int, default=64,
                     help='Batch size during training per GPU')
 parser.add_argument('-x', '--max_epochs', type=int,
                     default=5000, help='How many epochs to run in total?')
@@ -139,7 +139,7 @@ else :
 
 x_dim = 5
 c_dim = 10 #28, 28
-#z_dim = 10 #28, 28 -
+z_dim = 10 #28, 28
 h_dim = 10
 
 
@@ -147,28 +147,19 @@ h_dim = 10
 class Px(nn.Module):
 	def __init__(self):
 		super().__init__()
-
-		# Regressor for the 3 * 2 affine matrix
-		self.fc_loc = nn.Sequential(
-			nn.Linear(10 * 3 * 3, 32),
-			nn.ReLU(True),
-			nn.Linear(32, 3 * 2)
-			)
-		# Initialize the weights/bias with identity transformation
-		self.fc_loc[2].weight.data.zero_()
-		self.fc_loc[2].bias.data.copy_(torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float))		
-
-		#TODO: get correct input dimension
+        #self.pad = nn.ZeroPad2d((filter_size[1] - 1, 0, filter_size[0] - 1, 0))
+        #self.conv = nn.Conv2d(num_filters_in, num_filters_out, filter_size, stride=stride)
+		#torch.nn.Conv2d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True)
 		kernel=5
+
 		self.pad = nn.ZeroPad2d((kernel - 1, 0, kernel - 1, 0))
-		self.cond_conv_1 = nn.Conv2d(c_dim, args.nr_filters * 2, kernel, stride=1, padding=0)
+		self.cond_conv_1 = nn.Conv2d(c_dim+z_dim, args.nr_filters * 2, kernel, stride=1, padding=0)
 		self.cond_conv_2 = nn.Conv2d(args.nr_filters * 2, args.nr_filters * 2, kernel, stride=2, padding=0)
 		self.cond_conv_3 = nn.Conv2d(args.nr_filters * 2, args.nr_filters * 2, kernel, stride=2, padding=0)
 		
 		self.model = PixelCNN(nr_resnet=args.nr_resnet, nr_filters=args.nr_filters, 
-			input_channels=input_channels, nr_logistic_mix=args.nr_logistic_mix,
-			nr_softmax_bins=args.nr_softmax_bins)
-
+            input_channels=input_channels, nr_logistic_mix=args.nr_logistic_mix,
+            nr_softmax_bins=args.nr_softmax_bins)
 
 	def sample(model, cond_blocks=None): 
 		assert latents is not None
@@ -183,23 +174,14 @@ class Px(nn.Module):
 				data[:, :, i, j] = out_sample.data[:, :, i, j]
 		return data, out #the last output form the model should be the dist
 
-
-	def stn(self, z, c):
-		zs = z.view(-1, 10 * 3 * 3)
-		print("size of zs:", zs.size())
-		theta = self.fc_loc(zs)
-		theta = theta.view(-1, 2, 3)
-		grid = F.affine_grid(theta, c.size())
-		cond = F.grid_sample(c, grid)
-		return cond
-
 	def forward(self, c, z, x=None):
+
 		#make z and c into a big volume, d x 28 x 28
 		#TODO: make cond_blocks
 		#assume c_dim, z_dim, etc
 
-		cond = self.stn(z,c)
-		print("size of cond", cond.size())
+		cond = torch.cat((c,z), 1)
+
 		cond_blocks = {}
 		cond_blocks[(28, 28)] = self.cond_conv_1(self.pad(cond))
 		cond_blocks[(14, 14)] = self.cond_conv_2(self.pad(cond_blocks[(28, 28)]))
@@ -218,13 +200,11 @@ total_c_dim = c_dim*28*28
 class Qc(nn.Module):
 	def __init__(self):
 		super(Qc, self).__init__()
-		#old:
 		self.kernel = 5
 		self.pad = nn.ZeroPad2d((self.kernel - 1, 0, self.kernel - 1, 0))
 		self.embc = nn.Sequential(self.pad, nn.Conv2d(1, 10, self.kernel, stride=1, padding=0))
 		self.conv_mu = nn.Sequential(self.pad, nn.Conv2d(10, 10, self.kernel, stride=1, padding=0))
 		self.conv_sigma = nn.Sequential(self.pad, nn.Conv2d(10, 10, self.kernel, stride=1, padding=0), nn.Softplus())
-
 
 	def forward(self, inputs, c=None):	
 		emb = [self.embc(x) for x in inputs]
@@ -240,39 +220,23 @@ class Qc(nn.Module):
 class Qz(nn.Module):
 	def __init__(self):
 		super(Qz,self).__init__()
-		
-		#new:
-		self.localization_mu = nn.Sequential(
-				nn.Conv2d(1, 8, kernel_size=7),
-				nn.MaxPool2d(2, stride=2),
-				nn.ReLU(True),
-				nn.Conv2d(8, 10, kernel_size=5),
-				nn.MaxPool2d(2, stride=2),
-				)
+		self.kernel = 5
+		self.pad = nn.ZeroPad2d((self.kernel - 1, 0, self.kernel - 1, 0))
+		self.embc = nn.Sequential(self.pad, nn.Conv2d(1, 10, self.kernel, stride=1, padding=0))
+		self.conv_mu = nn.Sequential(self.pad, nn.Conv2d(10, 10, self.kernel, stride=1, padding=0))
+		self.conv_sigma = nn.Sequential(self.pad, nn.Conv2d(10, 10, self.kernel, stride=1, padding=0), nn.Softplus())
 
-		self.localization_sigma = nn.Sequential(
-				nn.Conv2d(1, 8, kernel_size=7),
-				nn.MaxPool2d(2, stride=2),
-				nn.ReLU(True),
-				nn.Conv2d(8, 10, kernel_size=5),
-				nn.MaxPool2d(2, stride=2),
-				nn.ReLU()
-				)
+		self.mu_z = nn.Linear(x_dim, z_dim)
+		self.sigma_z = nn.Sequential(nn.Linear(x_dim, z_dim), nn.Softplus())
 
 	def forward(self, inputs, c, z=None):
-		print(inputs)
-		print(len(inputs))
-
-		mu = self.localization_mu(inputs)
-		sigma = self.localization_sigma(inputs)
-
+		emb = [self.embc(x) for x in inputs]
+		emb = sum(emb)/len(emb)
+		mu = self.conv_mu(emb)
+		sigma = self.conv_sigma(emb)
 		dist = Normal(mu, sigma)
 		if z is None: z = dist.rsample()
-
-		print("size of z:", z.size())
-		return Result(z, dist.log_prob(z).sum(dim=1).sum(dim=1).sum(dim=1)) #TODO, fix
-
-
+		return Result(z, dist.log_prob(z).sum(dim=1).sum(dim=1).sum(dim=1))
 
 encoder = Factors(c=Qc(), z=Qz())
 decoder = Px()
@@ -298,17 +262,16 @@ class_labels = [i for i in range(len(classes)) for j in range(len(classes[i]))]
 """
 
 data, class_labels = zip(*[[img, label] for img, label in train_loader]) 
-print("after zip")
-data_cutoff = 200	
-data = torch.cat(data[:data_cutoff])
-class_labels = class_labels[:data_cutoff]
+
+data = torch.cat(data)
+
 #class_labels = class_labels
 print("data shape", data.shape)
 print("class_labels",class_labels[0])
 
 # Training
 batch_size = args.batch_size
-n_inputs = 2
+n_inputs = 4
 data_loader = DataLoader(data=data, c=class_labels, z=range(len(data)),
 		batch_size=batch_size, n_inputs=n_inputs)
 ############bat
