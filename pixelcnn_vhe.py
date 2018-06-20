@@ -20,7 +20,7 @@ import torch
 from torch import nn, optim
 from torch.distributions.normal import Normal
 
-from vhe import VHE, DataLoader, Factors
+from vhe import VHE, DataLoader, Factors, Result
 
 #######pixelcnn options #########
 parser = argparse.ArgumentParser()
@@ -190,10 +190,10 @@ class Px(nn.Module):
 
 		if x is None: 
 			x, dist = self.sample(self.model, cond_blocks=cond_blocks)
-			return x, -loss_op(x, dist)/x.size(0)# batch_size loss_op, luke
+			return Result(x, -loss_op(x, dist)/x.size(0) )# batch_size loss_op, luke
 		else:
 			#return x and distribution (or is it a loss?)
-			return x, -loss_op(x, self.model(x, cond_blocks=cond_blocks, sample=False))/x.size(0) #batch_size
+			return Result(x, -loss_op(x, self.model(x, cond_blocks=cond_blocks, sample=False))/x.size(0)) #batch_size
 
 total_c_dim = c_dim*28*28
 
@@ -215,7 +215,7 @@ class Qc(nn.Module):
 		dist = Normal(mu, sigma)
 		if c is None: c = dist.rsample()
 		#print(dist.log_prob(c).sum(dim=1))
-		return c, dist.log_prob(c).sum(dim=1).sum(dim=1).sum(dim=1)
+		return Result(c, dist.log_prob(c).sum(dim=1).sum(dim=1).sum(dim=1))
 
 class Qz(nn.Module):
 	def __init__(self):
@@ -236,7 +236,7 @@ class Qz(nn.Module):
 		sigma = self.conv_sigma(emb)
 		dist = Normal(mu, sigma)
 		if z is None: z = dist.rsample()
-		return z, dist.log_prob(z).sum(dim=1).sum(dim=1).sum(dim=1)
+		return Result(z, dist.log_prob(z).sum(dim=1).sum(dim=1).sum(dim=1))
 
 encoder = Factors(c=Qc(), z=Qz())
 decoder = Px()
@@ -271,7 +271,7 @@ print("class_labels",class_labels[0])
 
 # Training
 batch_size = args.batch_size
-n_inputs = 1
+n_inputs = 4
 data_loader = DataLoader(data=data, c=class_labels, z=range(len(data)),
 		batch_size=batch_size, n_inputs=n_inputs)
 ############bat
@@ -295,7 +295,7 @@ for epoch in range(1,11):
 		score, kl = vhe.score(inputs=inputs, sizes=sizes, x=target, return_kl=True)
 		(-score).backward() 
 		optimiser.step()
-		batchnum =+ 1 
+		batchnum = batchnum + 1
 		print("Batch %d Score %3.3f KLc %3.3f KLz %3.3f" % (batchnum, score.item(), kl.c.item(), kl.z.item()))
 	print("Epoch %d Score %3.3f KLc %3.3f KLz %3.3f" % (epoch, score.item(), kl.c.item(), kl.z.item()))
 
