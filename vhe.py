@@ -61,7 +61,6 @@ class DataLoader():
         if self.mode == "tensor":
             self.select_data = lambda x_idx: torch.index_select(self.data, 0, x_idx)
         else:
-            raise Exception("Data must be a tensor")
             self.select_data = lambda x_idx: [self.data[i] for i in x_idx]
         self.labels = {}     # For each label type, a LongTensor assigning elements to labels
         self.label_idxs = {} # For each label type, for each label, a list of indices
@@ -101,10 +100,14 @@ class DataLoader():
             possibilities = [self.label_idxs[k][v[i].item()] for i in range(len(x_idx))]
             sizes[k] = torch.Tensor([len(X) for X in possibilities])
             input_idx = [np.random.choice(X, size=self.n_inputs) for X in possibilities]
-            inputs[k] = torch.cat([
-                self.select_data(torch.LongTensor([I[j] for I in input_idx])).unsqueeze(1)
-                for j in range(self.n_inputs)], dim=1)
-
+            _inputs = [
+                self.select_data(torch.LongTensor([I[j] for I in input_idx]))
+                for j in range(self.n_inputs)]
+            if self.mode == "tensor":
+                inputs[k] = torch.cat([x.unsqueeze(1) for x in _inputs], dim=1)
+            elif self.mode == "list":
+                inputs[k] = [[_inputs[j][i] for j in range(self.n_inputs)]
+                        for i in range(len(_inputs[0]))]
         return self.VHEBatch(target=x, inputs=inputs, sizes=sizes)
 
 class Factor(namedtuple('Factor', ['module', 'name', 'args'])):
@@ -199,7 +202,7 @@ class VHE(nn.Module):
         # Reinforce objective
         objective = lowerbound
         for k,v in sampled_reinforce_log_probs.items():
-            objective += v * (ll - sum(kl[k]/sizes[k] for k2 in self.latents if k in self.dependencies[k2])).data
+            objective += v * (ll - sum(kl[k]/sizes[k] for k2 in self.latents if k in self.encoder.dependencies[k2] or k2 == k)).data
 
         if return_kl:
             return objective.mean(), self.KL(**{k:v.mean() for k,v in kl.items()})
@@ -207,12 +210,10 @@ class VHE(nn.Module):
             return objective.mean()
 
     def sample(self, inputs=None, batch_size=None):
-        assert (inputs is None) != (batch_size is None)
-        
         if inputs is None:
             samplers = self.prior
         else:
-            batch_size = list(inputs.values())[0][0].size(0) #First latent, first example 
+            batch_size = len(list(inputs.values())[0]) #First latent 
             samplers = {k:self.encoder.factors[k] if k in inputs else self.prior.factors[k] for k in self.latents}
             samplers[self.observation] = self.decoder
 

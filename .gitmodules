@@ -1,0 +1,3 @@
+[submodule "pinn"]
+	path = pinn
+	url = https://github.com/insperatum/pinn.git
