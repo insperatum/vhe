@@ -178,7 +178,7 @@ class VHE(nn.Module):
         sampled_log_probs = {}
         sampled_reinforce_log_probs = {}
         for k, factor in self.encoder.factors.items():
-            result = factor(inputs=inputs[k], **sampled_vars)
+            result = factor(inputs=inputs[k], **{k:v for k,v in sampled_vars.items() if k in factor.variables})
             sampled_vars[k], sampled_log_probs[k] = result.value, result.log_prob
             if result.reinforce_log_prob is not None: sampled_reinforce_log_probs[k] = result.reinforce_log_prob
         sampled_vars[self.observation] = kwargs[self.observation]
