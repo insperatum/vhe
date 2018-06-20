@@ -56,13 +56,15 @@ class PixelCNNLayer_down(nn.Module):
          
 
 class PixelCNN(nn.Module):
-    def __init__(self, nr_resnet=5, nr_filters=80, nr_logistic_mix=None, nr_softmax_bins=None, 
+    def __init__(self, nr_resnet=5, nr_filters=80, mode="logistic_mix", nr_logistic_mix=None, nr_softmax_bins=None, 
                     resnet_nonlinearity='concat_elu', input_channels=3):
+        """
+        mode can be 'logistic_mix', 'softmax' or 'gaussian'
+        """
 
         super(PixelCNN, self).__init__()
 
-        assert (nr_logistic_mix is None) != (nr_softmax_bins is None)
-        self.mode = "logistic_mix" if nr_logistic_mix is not None else "softmax" 
+        self.mode = mode
 
         if resnet_nonlinearity == 'concat_elu' : 
             self.resnet_nonlinearity = lambda x : concat_elu(x)
@@ -107,7 +109,9 @@ class PixelCNN(nn.Module):
             num_mix = 3 if self.input_channels == 1 else 10
             self.nin_out = nin(nr_filters, num_mix * nr_logistic_mix)
         elif self.mode == "softmax":
-            self.nin_out = nin(nr_filters, nr_softmax_bins)
+            self.nin_out = nin(nr_filters, self.input_channels * nr_softmax_bins)
+        elif self.mode == "gaussian":
+            self.nin_out = nin(nr_filters, self.input_channels * 2) #mu, sigma
         self.init_padding = None
 
 

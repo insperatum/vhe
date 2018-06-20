@@ -1,9 +1,7 @@
-import pdb
 import torch 
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from torch.nn.utils import weight_norm as wn
 import numpy as np
 
 
@@ -94,7 +92,9 @@ def discretized_mix_logistic_loss(x, l):
     log_probs        = cond * log_cdf_plus + (1. - cond) * inner_out
     log_probs        = torch.sum(log_probs, dim=3) + log_prob_from_logits(logit_probs)
     
-    return -torch.sum(log_sum_exp(log_probs))
+    #Don't sum over batch dimension
+    lse = log_sum_exp(log_probs)
+    return -torch.sum(lse.view(lse.size(0), -1), dim=1)
 
 
 def discretized_mix_logistic_loss_1d(x, l):
@@ -141,7 +141,9 @@ def discretized_mix_logistic_loss_1d(x, l):
     log_probs        = cond * log_cdf_plus + (1. - cond) * inner_out
     log_probs        = torch.sum(log_probs, dim=3) + log_prob_from_logits(logit_probs)
     
-    return -torch.sum(log_sum_exp(log_probs))
+    #Don't sum over batch dimension
+    lse = log_sum_exp(log_probs)
+    return -torch.sum(lse.view(lse.size(0), -1), dim=1)
 
 
 def to_one_hot(tensor, n, fill_with=1.):
@@ -275,9 +277,9 @@ def softmax_loss_1d(x, l):
     
     nr_softmax_bins = ls[1]
     x_quant = ((x+1)*nr_softmax_bins/2).long().clamp(max=nr_softmax_bins-1)
-    loss = F.cross_entropy(l, x_quant, size_average=False)
+    loss = F.cross_entropy(l, x_quant, reduce=False)
 
-    return loss
+    return torch.sum(loss.view(loss.size(0), -1), dim=1)
 
 
 def sample_from_softmax_1d(l):
@@ -302,3 +304,21 @@ def sample_from_softmax_1d(l):
     x0 = argmax.float()*2/(nr_softmax_bins-1) - 1
     out = x0.unsqueeze(1)
     return out
+
+def create_gaussian_conditional(l):
+    n_channels = int(l.size(1)/2)
+    mu = l[:, :n_channels]
+    sigma = F.softplus(l[:, n_channels:])
+    dist = torch.distributions.normal.Normal(mu, sigma)
+    return dist
+
+def gaussian_loss(x, l):
+    """ log-likelihood for gaussian """
+    dist = create_gaussian_conditional(l) 
+    loss = -dist.log_prob(x)
+    return torch.sum(loss.view(loss.size(0), -1), dim=1) 
+
+def sample_from_gaussian(l):
+    dist = create_gaussian_conditional(l)
+    x = dist.rsample()
+    return x

@@ -30,9 +30,10 @@ parser.add_argument('-q', '--nr_resnet', type=int, default=5,
                     help='Number of residual blocks per stage of the model')
 parser.add_argument('-n', '--nr_filters', type=int, default=160,
                     help='Number of filters to use across the model. Higher = larger model.')
-parser.add_argument('-m', '--nr_logistic_mix', type=int, default=None,
+parser.add_argument('-a', '--mode', type=str, default='logistic_mix', choices=['logistic_mix', 'softmax', 'gaussian'])
+parser.add_argument('-m', '--nr_logistic_mix', type=int, default=10,
                     help='Number of logistic components in the mixture. Higher = more flexible model')
-parser.add_argument('-sm', '--nr_softmax_bins', type=int, default=None,
+parser.add_argument('-sm', '--nr_softmax_bins', type=int, default=2,
                     help='Number of softmax bins (use instead of nr_logistic_mix)')
 parser.add_argument('-l', '--lr', type=float,
                     default=0.0002, help='Base learning rate')
@@ -45,9 +46,6 @@ parser.add_argument('-x', '--max_epochs', type=int,
 parser.add_argument('-s', '--seed', type=int, default=1,
                     help='Random seed to use')
 args = parser.parse_args()
-
-if args.nr_logistic_mix is None and args.nr_softmax_bins is None:
-	args.nr_logistic_mix = 10
 
 # reproducibility
 torch.manual_seed(args.seed)
@@ -75,12 +73,15 @@ if 'mnist' in args.dataset :
     test_loader  = torch.utils.data.DataLoader(datasets.MNIST(args.data_dir, train=False, 
                     transform=ds_transforms), batch_size=args.batch_size, shuffle=True, **kwargs)
     
-    if args.nr_logistic_mix:
+    if args.mode == "logistic_mix":
         loss_op   = lambda real, fake : discretized_mix_logistic_loss_1d(real, fake)
         sample_op = lambda x : sample_from_discretized_mix_logistic_1d(x, args.nr_logistic_mix)
-    else:
+    elif args.mode == "softmax":
         loss_op   = lambda real, fake : softmax_loss_1d(real, fake)
         sample_op = lambda x : sample_from_softmax_1d(x)
+    elif args.mode == "gaussian":
+        loss_op   = lambda real, fake: gaussian_loss(real, fake)
+        sample_op = lambda x: sample_from_gaussian(x)
 
 
 elif 'cifar' in args.dataset : 
@@ -90,11 +91,15 @@ elif 'cifar' in args.dataset :
     test_loader  = torch.utils.data.DataLoader(datasets.CIFAR10(args.data_dir, train=False, 
                     transform=ds_transforms), batch_size=args.batch_size, shuffle=True, **kwargs)
     
-    if args.nr_logistic_mix:
+    if args.mode=="logistic_mix":
         loss_op   = lambda real, fake : discretized_mix_logistic_loss(real, fake)
         sample_op = lambda x : sample_from_discretized_mix_logistic(x, args.nr_logistic_mix)
-    else:
+    elif args.mode=="softmax":
         raise NotImplementedError("No 3D Softmax")
+    elif args.mode == "gaussian":
+        loss_op   = lambda real, fake: gaussian_loss(real, fake)
+        sample_op = lambda x: sample_from_gaussian(x)
+
 
 elif 'omni' in args.dataset :
 
@@ -106,18 +111,21 @@ elif 'omni' in args.dataset :
                         background=False, transform=omni_transforms), batch_size=args.batch_size, 
                             shuffle=True, **kwargs)
 
-    if args.nr_logistic_mix:
+    if args.mode=="logistic_mix":
         loss_op   = lambda real, fake : discretized_mix_logistic_loss_1d(real, fake)
         sample_op = lambda x : sample_from_discretized_mix_logistic_1d(x, args.nr_logistic_mix)
-    else:
+    elif args.mode=="softmax":
         loss_op   = lambda real, fake : softmax_loss_1d(real, fake)
         sample_op = lambda x : sample_from_softmax_1d(x)
+    elif args.mode == "gaussian":
+        loss_op   = lambda real, fake: gaussian_loss(real, fake)
+        sample_op = lambda x: sample_from_gaussian(x)
 
 else :
     raise Exception('{} dataset not in {mnist, cifar10, omniglot}'.format(args.dataset))
 
 model = PixelCNN(nr_resnet=args.nr_resnet, nr_filters=args.nr_filters, 
-            input_channels=input_channels, nr_logistic_mix=args.nr_logistic_mix,
+            input_channels=input_channels, mode=args.mode,  nr_logistic_mix=args.nr_logistic_mix,
 			nr_softmax_bins=args.nr_softmax_bins)
 model = model.cuda()
 
@@ -153,7 +161,7 @@ for epoch in range(args.max_epochs):
         input = input.cuda(async=True)
         input = Variable(input)
         output = model(input) #output is a distribution
-        loss = loss_op(input, output)
+        loss = loss_op(input, output).sum()
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
