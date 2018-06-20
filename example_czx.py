@@ -75,8 +75,10 @@ class_labels = [i for i in range(len(classes)) for j in range(len(classes[i]))]
 # Training
 batch_size = 100
 n_inputs = 1
-data_loader = DataLoader(data=data, c=class_labels, z=range(len(data)),
-        batch_size=batch_size, n_inputs=n_inputs)
+data_loader = DataLoader(data=data,
+        labels={"c":class_labels, "z":range(len(data))},
+        k_shot={"c":5, "z":1},
+        batch_size=batch_size)
 
 
 # Training

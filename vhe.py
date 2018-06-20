@@ -55,7 +55,7 @@ class Result:
         
 class DataLoader():
     VHEBatch = namedtuple("VHEBatch", ["inputs", "sizes", "target"])
-    def __init__(self, data, batch_size, n_inputs=1, **kwargs):
+    def __init__(self, data, batch_size, labels, k_shot):
         self.data = data
         self.mode = "tensor" if torch.is_tensor(data) else "list"
         if self.mode == "tensor":
@@ -64,7 +64,7 @@ class DataLoader():
             self.select_data = lambda x_idx: [self.data[i] for i in x_idx]
         self.labels = {}     # For each label type, a LongTensor assigning elements to labels
         self.label_idxs = {} # For each label type, for each label, a list of indices
-        for k,v in kwargs.items():
+        for k,v in labels.items():
             unique_oldlabels = list(set(v))
             map_label = {oldlabel:label for label, oldlabel in enumerate(unique_oldlabels)}
             self.labels[k] = torch.LongTensor([map_label[oldlabel] for oldlabel in v])
@@ -74,7 +74,7 @@ class DataLoader():
             for j in range(len(unique_oldlabels)):
                 self.label_idxs[k][j]=torch.LongTensor(self.label_idxs[k][j])
         self.batch_size = batch_size
-        self.n_inputs = n_inputs
+        self.k_shot = k_shot
 
     def __iter__(self):
         self.next_i = 0
@@ -99,14 +99,14 @@ class DataLoader():
         for k,v in labels.items():
             possibilities = [self.label_idxs[k][v[i].item()] for i in range(len(x_idx))]
             sizes[k] = torch.Tensor([len(X) for X in possibilities])
-            input_idx = [np.random.choice(X, size=self.n_inputs) for X in possibilities]
+            input_idx = [np.random.choice(X, size=self.k_shot[k]) for X in possibilities]
             _inputs = [
                 self.select_data(torch.LongTensor([I[j] for I in input_idx]))
-                for j in range(self.n_inputs)]
+                for j in range(self.k_shot[k])]
             if self.mode == "tensor":
                 inputs[k] = torch.cat([x.unsqueeze(1) for x in _inputs], dim=1)
             elif self.mode == "list":
-                inputs[k] = [[_inputs[j][i] for j in range(self.n_inputs)]
+                inputs[k] = [[_inputs[j][i] for j in range(self.k_shot[k])]
                         for i in range(len(_inputs[0]))]
         return self.VHEBatch(target=x, inputs=inputs, sizes=sizes)
 
