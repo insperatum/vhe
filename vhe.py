@@ -58,7 +58,6 @@ class DataLoader():
     def __init__(self, data, batch_size, labels, k_shot):
         self.data = data
         self.mode = "tensor" if torch.is_tensor(data) else "list"
-        print("mode print:", self.mode)
         if self.mode == "tensor":
             self.select_data = lambda x_idx: torch.index_select(self.data, 0, x_idx)
         else:
@@ -99,7 +98,7 @@ class DataLoader():
         sizes = {} 
         for k,v in labels.items():
             possibilities = [self.label_idxs[k][v[i].item()] for i in range(len(x_idx))]
-            sizes[k] = torch.Tensor([len(X) for X in possibilities])
+            sizes[k] = [len(X) for X in possibilities]
             input_idx = [np.random.choice(X, size=self.k_shot[k]) for X in possibilities]
             _inputs = [
                 self.select_data(torch.LongTensor([I[j] for I in input_idx]))
@@ -152,6 +151,13 @@ class Factors:
         self.variables = list(self.factors.keys())
         self.modules = list(f.module for f in self.factors.values())
 
+class Vars():
+    def __init__(self, **kwargs):
+        for k,v in kwargs.items():
+            setattr(self, k, v)
+class KL(Vars):
+    pass
+
 class VHE(nn.Module):
     def __init__(self, encoder, decoder, prior=None):
         super(VHE, self).__init__()
@@ -166,8 +172,6 @@ class VHE(nn.Module):
     
         self.observation = self.decoder.name 
         self.latents = self.prior.variables 
-        self.Vars = namedtuple("Vars", self.latents + [self.observation])
-        self.KL = namedtuple("KL", self.latents)
 
     def score(self, inputs, sizes, return_kl=False, **kwargs):
         assert set(inputs.keys()) == set(self.latents)
@@ -199,15 +203,16 @@ class VHE(nn.Module):
         ll = self.decoder(**args).log_prob
 
         # VHE Objective
-        lowerbound = ll - sum(kl[k]/sizes[k] for k in self.latents) 
+        t = ll
+        lowerbound = ll - sum(kl[k]/t.new(sizes[k]) for k in self.latents) 
 
         # Reinforce objective
         objective = lowerbound
         for k,v in sampled_reinforce_log_probs.items():
-            objective += v * (ll - sum(kl[k]/sizes[k] for k2 in self.latents if k in self.encoder.dependencies[k2] or k2 == k)).data
+            objective += v * (ll - sum(kl[k]/t.new(sizes[k]) for k2 in self.latents if k in self.encoder.dependencies[k2] or k2 == k)).data
 
         if return_kl:
-            return objective.mean(), self.KL(**{k:v.mean() for k,v in kl.items()})
+            return objective.mean(), KL(**{k:v.mean() for k,v in kl.items()})
         else:
             return objective.mean()
 
@@ -231,4 +236,4 @@ class VHE(nn.Module):
         except StopIteration:
             raise Exception("Can't find a valid sampling path")
 
-        return self.Vars(**sampled_vars)
+        return Vars(**sampled_vars)

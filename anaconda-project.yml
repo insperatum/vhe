@@ -47,6 +47,7 @@ downloads: {}
 packages:
 - pytorch
 - torchvision
+- scipy
 
 #
 # In the channels section, list any Conda channel URLs to be searched
