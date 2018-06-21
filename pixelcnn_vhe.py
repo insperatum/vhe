@@ -186,7 +186,7 @@ class Px(nn.Module):
 
 	def stn(self, z, c):
 		zs = z.view(-1, 10 * 3 * 3)
-		print("size of zs:", zs.size())
+		#print("size of zs:", zs.size())
 		theta = self.fc_loc(zs)
 		theta = theta.view(-1, 2, 3)
 		grid = F.affine_grid(theta, c.size())
@@ -199,7 +199,7 @@ class Px(nn.Module):
 		#assume c_dim, z_dim, etc
 
 		cond = self.stn(z,c)
-		print("size of cond", cond.size())
+		#print("size of cond", cond.size())
 		cond_blocks = {}
 		cond_blocks[(28, 28)] = self.cond_conv_1(self.pad(cond))
 		cond_blocks[(14, 14)] = self.cond_conv_2(self.pad(cond_blocks[(28, 28)]))
@@ -213,8 +213,6 @@ class Px(nn.Module):
 			#return x and distribution (or is it a loss?)
 			return Result(x, -loss_op(x, self.model(x, cond_blocks=cond_blocks, sample=False))/x.size(0)) #batch_size
 
-total_c_dim = c_dim*28*28
-
 class Qc(nn.Module):
 	def __init__(self):
 		super(Qc, self).__init__()
@@ -227,8 +225,15 @@ class Qc(nn.Module):
 
 
 	def forward(self, inputs, c=None):	
-		emb = [self.embc(x) for x in inputs]
-		emb = sum(emb)/len(emb)
+		#print("size of inputs to c", inputs.size())
+
+		#exchangability stuff
+		embs = [self.embc(inputs[:,i,:,:,:]) for i in range(inputs.size(1))]
+		emb = sum(embs)/len(embs)
+
+		#emb = self.embc(inputs.sum(1))
+		#print("size of c emb", emb.size())
+		emb = nn.ReLU()(emb)
 		mu = self.conv_mu(emb)
 		sigma = self.conv_sigma(emb)
 
@@ -256,20 +261,27 @@ class Qz(nn.Module):
 				nn.ReLU(True),
 				nn.Conv2d(8, 10, kernel_size=5, stride=1),
 				nn.MaxPool2d(2, stride=2),
-				nn.ReLU()
+				nn.Softmax()
 				)
 
 	def forward(self, inputs, c, z=None):
-		print("inputs size", inputs.size())
-
+		#print("size of inputs to z", inputs.size())
+		inputs = inputs.view(-1, 1, 28, 28)
 		mu = self.localization_mu(inputs)
 		sigma = self.localization_sigma(inputs)
+		#print("mu type:", type(mu))
+		#print("sigma", sigma)
+		#print("mu", mu)
 
 		dist = Normal(mu, sigma)
-		if z is None: z = dist.rsample()
-
-		print("size of z:", z.size())
-		return Result(z, dist.log_prob(z).sum(dim=1).sum(dim=1).sum(dim=1)) #TODO, fix
+		if z is None: 
+			z = dist.rsample()
+			#print("sampled z")
+		#print("size of z:", z.size())
+		#print("z", z)
+		score = dist.log_prob(z).sum(dim=1).sum(dim=1).sum(dim=1)
+		#print("z score:", score)
+		return Result(z, score) 
 
 
 
@@ -295,25 +307,20 @@ for i in range(1000):
 data = torch.cat(classes)
 class_labels = [i for i in range(len(classes)) for j in range(len(classes[i]))] 
 """
-
-data, class_labels = zip(*[[img, label] for img, label in train_loader]) 
-print("after zip")
-
-data_cutoff = 200	
-data = torch.cat(data[:data_cutoff])
-class_labels = class_labels[:data_cutoff]
-#class_labels = class_labels
-print("data shape", data.shape)
-print("class_labels",class_labels[0])
-
+from itertools import islice
+data_cutoff = None
+if data_cutoff is not None:
+	data, class_labels = zip(*islice(train_loader, data_cutoff))
+else:
+	data, class_labels = zip(*train_loader, data_cutoff)
+data = torch.cat(data)
+print("dataset size", data.size())
 # Training
 batch_size = args.batch_size
 n_inputs = 2
-#data_loader = DataLoader(data=data, c=class_labels, z=range(len(data)),
-#		batch_size=batch_size, n_inputs=n_inputs)
 
 data_loader = DataLoader(data=data, labels = {'c':class_labels, 'z':range(len(data))},
-		batch_size=batch_size, k_shot= {'c': n_inputs, 'z':1} )
+		batch_size=batch_size, k_shot= {'c': n_inputs, 'z': 1} )
 
 ############bat
 
