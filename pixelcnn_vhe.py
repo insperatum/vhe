@@ -114,9 +114,6 @@ elif 'omni' in args.dataset :
     train_loader = torch.utils.data.DataLoader(datasets.Omniglot(args.data_dir, download=True, 
                         background=True, transform=omni_transforms), batch_size=1, 
                             shuffle=True, **kwargs)
-
-    #d = datasets.Omniglot(args.data_dir, download=True, 
-    #                   background=True, transform=omni_transforms)
     
     test_loader = torch.utils.data.DataLoader(datasets.Omniglot(args.data_dir, download=True, 
                         background=False, transform=omni_transforms), batch_size=1, 
@@ -158,7 +155,7 @@ class Px(nn.Module):
 		self.fc_loc[2].weight.data.zero_()
 		self.fc_loc[2].bias.data.copy_(torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float))		
 
-		#TODO: get correct input dimension
+
 		kernel=5
 		self.pad = nn.ZeroPad2d((kernel - 1, 0, kernel - 1, 0))
 		self.cond_conv_1 = nn.Conv2d(c_dim, args.nr_filters * 2, kernel, stride=1, padding=0)
@@ -181,12 +178,11 @@ class Px(nn.Module):
 				out   = model(data_v, sample=True, cond_blocks=cond_blocks)
 				out_sample = sample_op(out)
 				data[:, :, i, j] = out_sample.data[:, :, i, j]
-		return data, out #the last output form the model should be the dist
+		return data, out 
 
 
 	def stn(self, z, c):
 		zs = z.view(-1, 10 * 3 * 3)
-		#print("size of zs:", zs.size())
 		theta = self.fc_loc(zs)
 		theta = theta.view(-1, 2, 3)
 		grid = F.affine_grid(theta, c.size())
@@ -194,12 +190,8 @@ class Px(nn.Module):
 		return cond
 
 	def forward(self, c, z, x=None):
-		#make z and c into a big volume, d x 28 x 28
-		#TODO: make cond_blocks
-		#assume c_dim, z_dim, etc
-
 		cond = self.stn(z,c)
-		#print("size of cond", cond.size())
+
 		cond_blocks = {}
 		cond_blocks[(28, 28)] = self.cond_conv_1(self.pad(cond))
 		cond_blocks[(14, 14)] = self.cond_conv_2(self.pad(cond_blocks[(28, 28)]))
@@ -208,15 +200,15 @@ class Px(nn.Module):
 
 		if x is None: 
 			x, dist = self.sample(self.model, cond_blocks=cond_blocks)
-			return Result(x, -loss_op(x, dist)/x.size(0) )# batch_size loss_op, luke
+			return Result(x, -loss_op(x, dist)/x.size(0) )
 		else:
-			#return x and distribution (or is it a loss?)
+
 			return Result(x, -loss_op(x, self.model(x, cond_blocks=cond_blocks, sample=False))/x.size(0)) #batch_size
 
 class Qc(nn.Module):
 	def __init__(self):
 		super(Qc, self).__init__()
-		#old:
+
 		self.kernel = 5
 		self.pad = nn.ZeroPad2d((self.kernel - 1, 0, self.kernel - 1, 0))
 		self.embc = nn.Sequential(self.pad, nn.Conv2d(1, 10, self.kernel, stride=1, padding=0))
@@ -225,21 +217,17 @@ class Qc(nn.Module):
 
 
 	def forward(self, inputs, c=None):	
-		#print("size of inputs to c", inputs.size())
-
 		#exchangability stuff
 		embs = [self.embc(inputs[:,i,:,:,:]) for i in range(inputs.size(1))]
 		emb = sum(embs)/len(embs)
 
-		#emb = self.embc(inputs.sum(1))
-		#print("size of c emb", emb.size())
 		emb = nn.ReLU()(emb)
 		mu = self.conv_mu(emb)
 		sigma = self.conv_sigma(emb)
 
 		dist = Normal(mu, sigma)
 		if c is None: c = dist.rsample()
-		#print(dist.log_prob(c).sum(dim=1))
+
 		return Result(c, dist.log_prob(c).sum(dim=1).sum(dim=1).sum(dim=1))
 
 class Qz(nn.Module):
@@ -265,22 +253,15 @@ class Qz(nn.Module):
 				)
 
 	def forward(self, inputs, c, z=None):
-		#print("size of inputs to z", inputs.size())
+
 		inputs = inputs.view(-1, 1, 28, 28)
 		mu = self.localization_mu(inputs)
 		sigma = self.localization_sigma(inputs)
-		#print("mu type:", type(mu))
-		#print("sigma", sigma)
-		#print("mu", mu)
 
 		dist = Normal(mu, sigma)
 		if z is None: 
 			z = dist.rsample()
-			#print("sampled z")
-		#print("size of z:", z.size())
-		#print("z", z)
 		score = dist.log_prob(z).sum(dim=1).sum(dim=1).sum(dim=1)
-		#print("z score:", score)
 		return Result(z, score) 
 
 
@@ -349,6 +330,8 @@ for epoch in range(1,11):
 
 	#may not want this, but can keep:
 	scheduler.step()
+
+
 
 
 for mu in [-1, 0, 1]:
