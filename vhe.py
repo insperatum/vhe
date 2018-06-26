@@ -2,6 +2,7 @@ from builtins import super
 
 import inspect
 from collections import namedtuple, OrderedDict
+import numbers
 
 import torch
 from torch import nn, distributions
@@ -173,11 +174,14 @@ class VHE(nn.Module):
         self.observation = self.decoder.name 
         self.latents = self.prior.variables 
 
-    def score(self, inputs, sizes, return_kl=False, **kwargs):
+    def score(self, inputs, sizes, return_kl=False, kl_factor=1, **kwargs):
         assert set(inputs.keys()) == set(self.latents)
         assert set(sizes.keys()) == set(self.latents)
         assert set(kwargs.keys()) == set([self.observation])
-
+        
+        if isinstance(kl_factor, numbers.Number): kl_factor = {k: kl_factor for k in self.latents}
+        else: kl_factor = {k: kl_factor.get(k, 1) for k in self.latents}
+            
         # Sample from encoder
         sampled_vars = {}
         sampled_log_probs = {}
@@ -204,12 +208,12 @@ class VHE(nn.Module):
 
         # VHE Objective
         t = ll
-        lowerbound = ll - sum(kl[k]/t.new(sizes[k]) for k in self.latents) 
+        lowerbound = ll - sum(kl_factor[k]*kl[k]/t.new(sizes[k]) for k in self.latents) 
 
         # Reinforce objective
         objective = lowerbound
         for k,v in sampled_reinforce_log_probs.items():
-            objective += v * (ll - sum(kl[k]/t.new(sizes[k]) for k2 in self.latents if k in self.encoder.dependencies[k2] or k2 == k)).data
+            objective += v * (ll - sum(kl_factor[k]*kl[k]/t.new(sizes[k]) for k2 in self.latents if k in self.encoder.dependencies[k2] or k2 == k)).data
 
         if return_kl:
             return objective.mean(), KL(**{k:v.mean() for k,v in kl.items()})
