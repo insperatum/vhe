@@ -19,8 +19,9 @@ import random
 import torch
 from torch import nn, optim
 from torch.distributions.normal import Normal
+import math
 
-from vhe import VHE, DataLoader, Factors, Result
+from vhe import VHE, DataLoader, Factors, Result, NormalPrior
 
 #######pixelcnn options #########
 parser = argparse.ArgumentParser()
@@ -42,6 +43,7 @@ parser.add_argument('-q', '--nr_resnet', type=int, default=3,
                     help='Number of residual blocks per stage of the model')
 parser.add_argument('-n', '--nr_filters', type=int, default=80,
                     help='Number of filters to use across the model. Higher = larger model.')
+parser.add_argument('-a', '--mode', type=str, default='logistic_mix', choices=['logistic_mix', 'softmax', 'gaussian'])
 parser.add_argument('-m', '--nr_logistic_mix', type=int, default=None,
                     help='Number of logistic components in the mixture. Higher = more flexible model')
 parser.add_argument('-sm', '--nr_softmax_bins', type=int, default=None,
@@ -88,13 +90,15 @@ if 'mnist' in args.dataset :
     test_loader  = torch.utils.data.DataLoader(datasets.MNIST(args.data_dir, train=False, 
                     transform=ds_transforms), batch_size=args.batch_size, shuffle=True, **kwargs)
     
-    if args.nr_logistic_mix:
+    if args.mode == "logistic_mix":
         loss_op   = lambda real, fake : discretized_mix_logistic_loss_1d(real, fake)
         sample_op = lambda x : sample_from_discretized_mix_logistic_1d(x, args.nr_logistic_mix)
-    else:
+    elif args.mode == "softmax":
         loss_op   = lambda real, fake : softmax_loss_1d(real, fake)
         sample_op = lambda x : sample_from_softmax_1d(x)
-
+    elif args.mode == "gaussian":
+        loss_op   = lambda real, fake: gaussian_loss(real, fake)
+        sample_op = lambda x: sample_from_gaussian(x)
 
 elif 'cifar' in args.dataset : 
     train_loader = torch.utils.data.DataLoader(datasets.CIFAR10(args.data_dir, train=True, 
@@ -103,11 +107,14 @@ elif 'cifar' in args.dataset :
     test_loader  = torch.utils.data.DataLoader(datasets.CIFAR10(args.data_dir, train=False, 
                     transform=ds_transforms), batch_size=args.batch_size, shuffle=True, **kwargs)
     
-    if args.nr_logistic_mix:
+    if args.mode=="logistic_mix":
         loss_op   = lambda real, fake : discretized_mix_logistic_loss(real, fake)
         sample_op = lambda x : sample_from_discretized_mix_logistic(x, args.nr_logistic_mix)
-    else:
+    elif args.mode=="softmax":
         raise NotImplementedError("No 3D Softmax")
+    elif args.mode == "gaussian":
+        loss_op   = lambda real, fake: gaussian_loss(real, fake)
+        sample_op = lambda x: sample_from_gaussian(x)
 
 elif 'omni' in args.dataset :
 
@@ -119,17 +126,19 @@ elif 'omni' in args.dataset :
                         background=False, transform=omni_transforms), batch_size=1, 
                             shuffle=True, **kwargs)
     
-    if args.nr_logistic_mix:
+    if args.mode=="logistic_mix":
         loss_op   = lambda real, fake : discretized_mix_logistic_loss_1d(real, fake)
         sample_op = lambda x : sample_from_discretized_mix_logistic_1d(x, args.nr_logistic_mix)
-    else:
+    elif args.mode=="softmax":
         loss_op   = lambda real, fake : softmax_loss_1d(real, fake)
         sample_op = lambda x : sample_from_softmax_1d(x)
+    elif args.mode == "gaussian":
+        loss_op   = lambda real, fake: gaussian_loss(real, fake)
+        sample_op = lambda x: sample_from_gaussian(x)
 
 else :
     raise Exception('{} dataset not in {mnist, cifar10, omniglot}'.format(args.dataset))
 #######end pixelcnn options #########
-
 
 
 
@@ -155,6 +164,8 @@ class Px(nn.Module):
 		self.fc_loc[2].weight.data.zero_()
 		self.fc_loc[2].bias.data.copy_(torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float))		
 
+		self.obs = (1, 28, 28) if 'mnist' in args.dataset or 'omni' in args.dataset else (3, 32, 32)
+
 
 		kernel=5
 		self.pad = nn.ZeroPad2d((kernel - 1, 0, kernel - 1, 0))
@@ -163,20 +174,25 @@ class Px(nn.Module):
 		self.cond_conv_3 = nn.Conv2d(args.nr_filters * 2, args.nr_filters * 2, kernel, stride=2, padding=0)
 		
 		self.model = PixelCNN(nr_resnet=args.nr_resnet, nr_filters=args.nr_filters, 
-			input_channels=input_channels, nr_logistic_mix=args.nr_logistic_mix,
-			nr_softmax_bins=args.nr_softmax_bins)
+			input_channels=input_channels,
+			nr_softmax_bins=args.nr_softmax_bins, mode="softmax")
+		assert args.mode == "softmax"
 
+
+	def loss_op(self, real,fake): return softmax_loss_1d(real, fake)
+	def sample_op(self, x): return sample_from_softmax_1d(x)
+		#TODO: factor loss op into here
 
 	def sample(model, cond_blocks=None): 
 		assert latents is not None
 		model.train(False)
-		data = torch.zeros(sample_batch_size, obs[0], obs[1], obs[2])
+		data = torch.zeros(sample_batch_size, self.obs[0], self.obs[1], self.obs[2])
 		data = data.cuda()
-		for i in range(obs[1]):
-			for j in range(obs[2]):
+		for i in range(self.obs[1]):
+			for j in range(self.obs[2]):
 				data_v = Variable(data, volatile=True)
 				out   = model(data_v, sample=True, cond_blocks=cond_blocks)
-				out_sample = sample_op(out)
+				out_sample = self.sample_op(out)
 				data[:, :, i, j] = out_sample.data[:, :, i, j]
 		return data, out 
 
@@ -200,21 +216,90 @@ class Px(nn.Module):
 
 		if x is None: 
 			x, dist = self.sample(self.model, cond_blocks=cond_blocks)
-			return Result(x, -loss_op(x, dist)/x.size(0) )
+			return Result(x, -self.loss_op(x, dist))# /x.size(0) )
 		else:
 
-			return Result(x, -loss_op(x, self.model(x, cond_blocks=cond_blocks, sample=False))/x.size(0)) #batch_size
+			return Result(x, -self.loss_op(x, self.model(x, cond_blocks=cond_blocks, sample=False)))# /x.size(0)) #batch_size
+
+class Qc_stn(nn.Module):
+	def __init__(self):
+		super(Qc_stn, self).__init__()
+		self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
+		self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
+		self.conv2_drop = nn.Dropout2d()
+		self.fc1 = nn.Linear(320, 50)
+		self.fc2 = nn.Linear(50, 10)
+
+		# Spatial transformer localization-network
+		self.localization = nn.Sequential(
+			nn.Conv2d(1, 8, kernel_size=7),
+			nn.MaxPool2d(2, stride=2),
+			nn.ReLU(True),
+			nn.Conv2d(8, 10, kernel_size=5),
+			nn.MaxPool2d(2, stride=2),
+			nn.ReLU(True)
+		)
+
+		# Regressor for the 3 * 2 affine matrix
+		self.fc_loc = nn.Sequential(
+			nn.Linear(10 * 3 * 3, 32),
+			nn.ReLU(True),
+			nn.Linear(32, 3 * 2)
+		)
+
+		# Initialize the weights/bias with identity transformation
+		self.fc_loc[2].weight.data.zero_()
+		self.fc_loc[2].bias.data.copy_(torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float))
+
+		self.kernel = 5
+		self.c_dim = 10
+		self.pad = nn.ZeroPad2d((self.kernel - 1, 0, self.kernel - 1, 0))
+		self.conv_post_stn = nn.Sequential(self.pad, nn.Conv2d(1, c_dim, self.kernel, stride=1, padding=0), nn.ReLU())
+		self.conv_mu = nn.Sequential(self.pad, nn.Conv2d(c_dim, c_dim, self.kernel, stride=1, padding=0))
+		self.conv_sigma = nn.Sequential(self.pad, nn.Conv2d(c_dim, c_dim, self.kernel, stride=1, padding=0), nn.Softplus())
+
+	# Spatial transformer network forward function
+	def stn(self, x):
+		xs = self.localization(x)
+		xs = xs.view(-1, 10 * 3 * 3)
+		theta = self.fc_loc(xs)
+		theta = theta.view(-1, 2, 3)
+		grid = F.affine_grid(theta, x.size())
+		x = F.grid_sample(x, grid)
+		return x
+
+	def forward(self, inputs, c=None):
+		# transform the input
+		xs = [self.stn(inputs[:,i,:,:,:]) for i in range(inputs.size(1))]
+
+		embs = [self.conv_post_stn(x) for x in xs]
+		emb = sum(embs)/len(embs)
+		mu = self.conv_mu(emb)
+		sigma = self.conv_sigma(emb)
+		dist = Normal(mu, sigma)
+		if c is None: c = dist.rsample()
+		return Result(c, dist.log_prob(c).sum(dim=1).sum(dim=1).sum(dim=1))
+
 
 class Qc(nn.Module):
 	def __init__(self):
 		super(Qc, self).__init__()
-
+		#I think this is supposed to be a normal spatial transformer. refer to pytorch docs
 		self.kernel = 5
 		self.pad = nn.ZeroPad2d((self.kernel - 1, 0, self.kernel - 1, 0))
 		self.embc = nn.Sequential(self.pad, nn.Conv2d(1, 10, self.kernel, stride=1, padding=0))
 		self.conv_mu = nn.Sequential(self.pad, nn.Conv2d(10, 10, self.kernel, stride=1, padding=0))
 		self.conv_sigma = nn.Sequential(self.pad, nn.Conv2d(10, 10, self.kernel, stride=1, padding=0), nn.Softplus())
 
+		#STN stuff:
+		self.fc_loc = nn.Sequential(
+			nn.Linear(10 * 3 * 3, 32),
+			nn.ReLU(True),
+			nn.Linear(32, 3 * 2)
+			)
+		# Initialize the weights/bias with identity transformation
+		self.fc_loc[2].weight.data.zero_()
+		self.fc_loc[2].bias.data.copy_(torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float))	
 
 	def forward(self, inputs, c=None):	
 		#exchangability stuff
@@ -253,25 +338,64 @@ class Qz(nn.Module):
 				)
 
 	def forward(self, inputs, c, z=None):
-
-		inputs = inputs.view(-1, 1, 28, 28)
+		inputs = inputs.view(-1, 1, 28, 28) #huh?
 		mu = self.localization_mu(inputs)
 		sigma = self.localization_sigma(inputs)
-
 		dist = Normal(mu, sigma)
 		if z is None: 
 			z = dist.rsample()
 		score = dist.log_prob(z).sum(dim=1).sum(dim=1).sum(dim=1)
 		return Result(z, score) 
 
+class Pc(nn.Module):
+	def __init__(self):
+		super(Pc,self).__init__()
+
+		self.model = PixelCNN(nr_resnet=int(args.nr_resnet/2), nr_filters=int(args.nr_filters/2), 
+			input_channels=10, mode="gaussian")
 
 
-encoder = Factors(c=Qc(), z=Qz())
+		self.obs = (10, 28, 28) if 'mnist' in args.dataset or 'omni' in args.dataset else (3, 32, 32)
+
+	def loss_op(self, real,fake): return gaussian_loss(real, fake)
+	def sample_op(self, x): return sample_from_gaussian(x)
+
+	def sample(model): 
+		assert latents is not None
+		model.train(False)
+		data = torch.zeros(sample_batch_size, self.obs[0], self.obs[1], self.obs[2])
+		data = data.cuda()
+		for i in range(self.obs[1]):
+			for j in range(self.obs[2]):
+				data_v = Variable(data, volatile=True)
+				out   = model(data_v, sample=True)
+				out_sample = self.sample_op(out)
+				data[:, :, i, j] = out_sample.data[:, :, i, j]
+		return data, out
+
+
+	def forward(self, c=None):
+		if c is None: 
+			c, dist = self.sample(self.model)
+			return Result(c, -self.loss_op(c, dist))#/c.size(0) )
+		else:
+			return Result(c, -self.loss_op(c, self.model(c, sample=False)))#/c.size(0)) #batch_size
+###
+#		if x is None: 
+#			x, dist = self.sample(self.model, cond_blocks=cond_blocks)
+#			return Result(x, -self.loss_op(x, dist)/x.size(0) )
+#		else:
+#
+#			return Result(x, -self.loss_op(x, self.model(x, cond_blocks=cond_blocks, sample=False))/x.size(0))
+
+
+prior = Factors(c=Pc(), z=NormalPrior())
+encoder = Factors(c=Qc_stn(), z=Qz())
 decoder = Px()
-vhe = VHE(encoder, decoder)
+vhe = VHE(encoder, decoder, prior=prior)
 vhe = vhe.cuda()
 print("created vhe")
-print("number of parameters is",sum(p.numel() for p in vhe.parameters() if p.requires_grad))
+print("number of parameters is", sum(p.numel() for p in vhe.parameters() if p.requires_grad))
 
 
 ########## Generate dataset############
@@ -289,11 +413,11 @@ data = torch.cat(classes)
 class_labels = [i for i in range(len(classes)) for j in range(len(classes[i]))] 
 """
 from itertools import islice
-data_cutoff = None
+data_cutoff = 100
 if data_cutoff is not None:
 	data, class_labels = zip(*islice(train_loader, data_cutoff))
 else:
-	data, class_labels = zip(*train_loader, data_cutoff)
+	data, class_labels = zip(*train_loader)
 data = torch.cat(data)
 print("dataset size", data.size())
 # Training
@@ -317,7 +441,8 @@ for epoch in range(1,11):
 	for batch in data_loader:
 		inputs = {k:v.cuda() for k,v in batch.inputs.items()}
 
-		sizes = {k:v.cuda() for k,v in batch.sizes.items()}
+		#sizes = {k:[item.cuda for item in v] for k,v in batch.sizes.items()}
+		sizes = batch.sizes
 		target = batch.target.cuda()
 
 		optimiser.zero_grad()
@@ -327,6 +452,9 @@ for epoch in range(1,11):
 		batchnum = batchnum + 1
 		print("Batch %d Score %3.3f KLc %3.3f KLz %3.3f" % (batchnum, score.item(), kl.c.item(), kl.z.item()))
 	print("Epoch %d Score %3.3f KLc %3.3f KLz %3.3f" % (epoch, score.item(), kl.c.item(), kl.z.item()))
+	if epoch %5==0: 
+		torch.save(vhe.state_dict(), './vhe_pixelCNN_epoch_{}.p'.format(epoch))
+		print("saved model")
 
 	#may not want this, but can keep:
 	scheduler.step()
