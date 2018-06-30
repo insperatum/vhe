@@ -404,7 +404,8 @@ vhe = vhe.cuda()
 print("created vhe")
 print("number of parameters is", sum(p.numel() for p in vhe.parameters() if p.requires_grad))
 
-reloadmodel = True
+#reloadmodel = True
+reloadmodel = False
 if reloadmodel:
 	vhe.load_state_dict(torch.load('VHE_pixelCNN_epoch_5.p'))
 
