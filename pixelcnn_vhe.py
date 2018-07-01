@@ -7,10 +7,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim import lr_scheduler
+import torchvision
 from torchvision import datasets, transforms, utils
 from pixelcnn.utils import * 
 from pixelcnn.model import * 
 from PIL import Image
+
 
 #VHE:
 from builtins import super
@@ -31,7 +33,7 @@ parser.add_argument('-i', '--data_dir', type=str,
 parser.add_argument('-o', '--save_dir', type=str, default='models',
                     help='Location for parameter checkpoints and samples')
 parser.add_argument('-d', '--dataset', type=str,
-                    default='mnist', help='Can be either cifar|mnist|omni')
+                    default='omni', help='Can be either cifar|mnist|omni')
 parser.add_argument('-p', '--print_every', type=int, default=50,
                     help='how many iterations between print statements')
 parser.add_argument('-t', '--save_interval', type=int, default=10,
@@ -43,21 +45,25 @@ parser.add_argument('-q', '--nr_resnet', type=int, default=3,
                     help='Number of residual blocks per stage of the model')
 parser.add_argument('-n', '--nr_filters', type=int, default=80,
                     help='Number of filters to use across the model. Higher = larger model.')
-parser.add_argument('-a', '--mode', type=str, default='logistic_mix', choices=['logistic_mix', 'softmax', 'gaussian'])
+parser.add_argument('-a', '--mode', type=str, default='softmax', choices=['logistic_mix', 'softmax', 'gaussian'])
 parser.add_argument('-m', '--nr_logistic_mix', type=int, default=None,
                     help='Number of logistic components in the mixture. Higher = more flexible model')
-parser.add_argument('-sm', '--nr_softmax_bins', type=int, default=None,
+parser.add_argument('-sm', '--nr_softmax_bins', type=int, default=2,
                     help='Number of softmax bins (use instead of nr_logistic_mix)')
 parser.add_argument('-l', '--lr', type=float,
                     default=0.0002, help='Base learning rate')
 parser.add_argument('-e', '--lr_decay', type=float, default=0.999995,
                     help='Learning rate decay, applied every step of the optimization')
-parser.add_argument('-b', '--batch_size', type=int, default=12,
+parser.add_argument('-b', '--batch_size', type=int, default=32,
                     help='Batch size during training per GPU')
 parser.add_argument('-x', '--max_epochs', type=int,
                     default=5000, help='How many epochs to run in total?')
 parser.add_argument('-s', '--seed', type=int, default=1,
                     help='Random seed to use')
+parser.add_argument('-an', '--anneal', type=int, default=None,
+                    help='number of epochs to anneal')
+parser.add_argument('--debug', action='store_true',
+                    help='if the number of batches is small')
 args = parser.parse_args()
 
 
@@ -71,7 +77,7 @@ np.random.seed(args.seed)
 model_name = 'pcnn_lr:{:.5f}_nr-resnet{}_nr-filters{}'.format(args.lr, args.nr_resnet, args.nr_filters)
 assert not os.path.exists(os.path.join('runs', model_name)), '{} already exists!'.format(model_name)
 
-sample_batch_size = 25
+sample_batch_size = args.batch_size
 obs = (1, 28, 28) if 'mnist' in args.dataset or 'omni' in args.dataset else (3, 32, 32)
 input_channels = obs[0]
 rescaling     = lambda x : (x - .5) * 2.
@@ -183,8 +189,8 @@ class Px(nn.Module):
 	def sample_op(self, x): return sample_from_softmax_1d(x)
 		#TODO: factor loss op into here
 
-	def sample(model, cond_blocks=None): 
-		assert latents is not None
+	def sample(self, model, cond_blocks=None): 
+		assert cond_blocks is not None
 		model.train(False)
 		data = torch.zeros(sample_batch_size, self.obs[0], self.obs[1], self.obs[2])
 		data = data.cuda()
@@ -215,8 +221,9 @@ class Px(nn.Module):
 				
 
 		if x is None: 
+
 			x, dist = self.sample(self.model, cond_blocks=cond_blocks)
-			return Result(x, -self.loss_op(x, dist))# /x.size(0) )
+			return Result(x, -self.loss_op(x, dist)) # /x.size(0) )
 		else:
 
 			return Result(x, -self.loss_op(x, self.model(x, cond_blocks=cond_blocks, sample=False)))# /x.size(0)) #batch_size
@@ -360,10 +367,10 @@ class Pc(nn.Module):
 	def loss_op(self, real,fake): return gaussian_loss(real, fake)
 	def sample_op(self, x): return sample_from_gaussian(x)
 
-	def sample(model): 
+	def sample(self,model): 
 		assert latents is not None
 		model.train(False)
-		data = torch.zeros(sample_batch_size, self.obs[0], self.obs[1], self.obs[2])
+		data = torch.zeros(sample_batch_size, self.obs[0], self.obs[1], self.obs[2]) #TODO: fix sample batch size
 		data = data.cuda()
 		for i in range(self.obs[1]):
 			for j in range(self.obs[2]):
@@ -397,6 +404,10 @@ vhe = vhe.cuda()
 print("created vhe")
 print("number of parameters is", sum(p.numel() for p in vhe.parameters() if p.requires_grad))
 
+#reloadmodel = True
+reloadmodel = False
+if reloadmodel:
+	vhe.load_state_dict(torch.load('VHE_pixelCNN_epoch_5.p'))
 
 ########## Generate dataset############
 #TODO:
@@ -413,10 +424,12 @@ data = torch.cat(classes)
 class_labels = [i for i in range(len(classes)) for j in range(len(classes[i]))] 
 """
 from itertools import islice
-data_cutoff = 100
-if data_cutoff is not None:
+
+if args.debug:
+	data_cutoff = 50
 	data, class_labels = zip(*islice(train_loader, data_cutoff))
 else:
+	data_cutoff = None
 	data, class_labels = zip(*train_loader)
 data = torch.cat(data)
 print("dataset size", data.size())
@@ -427,7 +440,18 @@ n_inputs = 2
 data_loader = DataLoader(data=data, labels = {'c':class_labels, 'z':range(len(data))},
 		batch_size=batch_size, k_shot= {'c': n_inputs, 'z': 1} )
 
-############bat
+#training data:
+if data_cutoff is not None:
+	test_data, test_class_labels = zip(*islice(test_loader, data_cutoff))
+else:
+	test_data, test_class_labels = zip(*test_loader)
+test_data = torch.cat(test_data)
+print("test dataset size", test_data.size())
+
+test_data_loader = DataLoader(data=test_data, labels = {'c':test_class_labels, 'z':range(len(test_data))},
+		batch_size=batch_size, k_shot= {'c': n_inputs, 'z': 1} )
+
+############batch
 
 
 
@@ -436,7 +460,13 @@ print("started training")
 
 optimiser = optim.Adam(vhe.parameters(), lr=1e-3)
 scheduler = lr_scheduler.StepLR(optimiser, step_size=1, gamma=args.lr_decay)
-for epoch in range(1,11):
+
+total_iter = 0
+for epoch in range(1,21):
+	#kl_factor = min((epoch-1)/args.anneal, 1) if args.anneal else 1
+	#kl_factor = 1/(1+math.exp((1500-total_iter)/10))
+	kl_factor = 0
+	print("kl_factor:", kl_factor)
 	batchnum = 0
 	for batch in data_loader:
 		inputs = {k:v.cuda() for k,v in batch.inputs.items()}
@@ -446,23 +476,38 @@ for epoch in range(1,11):
 		target = batch.target.cuda()
 
 		optimiser.zero_grad()
-		score, kl = vhe.score(inputs=inputs, sizes=sizes, x=target, return_kl=True)
+		score, kl = vhe.score(inputs=inputs, sizes=sizes, x=target, return_kl=True, kl_factor=kl_factor)
 		(-score).backward() 
 		optimiser.step()
 		batchnum = batchnum + 1
 		print("Batch %d Score %3.3f KLc %3.3f KLz %3.3f" % (batchnum, score.item(), kl.c.item(), kl.z.item()))
-	print("Epoch %d Score %3.3f KLc %3.3f KLz %3.3f" % (epoch, score.item(), kl.c.item(), kl.z.item()))
+		total_iter = total_iter + 1
+	print("---Epoch %d Score %3.3f KLc %3.3f KLz %3.3f" % (epoch, score.item(), kl.c.item(), kl.z.item()))
+
 	if epoch %5==0: 
-		torch.save(vhe.state_dict(), './vhe_pixelCNN_epoch_{}.p'.format(epoch))
+		torch.save(vhe.state_dict(), './VHE_pixelCNN_epoch_{}.p'.format(epoch))
 		print("saved model")
+
+
+		#Sampling:
+		for batch in islice(test_data_loader, 1):
+			test_inputs = {k:v.cuda() for k,v in batch.inputs.items()}
+			print("\nPosterior predictive for test inputs")
+			sampled_x = vhe.sample(inputs={'c':test_inputs['c']}).x #need see because i only want to sample from the input images
+
+
+		torchvision.utils.save_image([test_inputs['c'][i,j,:,:,:] for j in range(n_inputs) for i in range(args.batch_size)] , "sample_support_epoch_{}.png".format(epoch), padding=5, pad_value=1, nrow=args.batch_size)
+		torchvision.utils.save_image(sampled_x, "samples_epoch_{}.png".format(epoch), padding=5, pad_value=1, nrow=args.batch_size)
+
+
+	#do testing
+	vhe.train()
 
 	#may not want this, but can keep:
 	scheduler.step()
 
 
-
-
-for mu in [-1, 0, 1]:
-	test_D = [mu + 0.1*torch.randn(1,x_dim) for _ in range(n_inputs)]
-	print("\nPosterior predictive for", test_D)
-	print(vhe.sample(inputs={"c":test_D}).x)
+#for mu in [-1, 0, 1]:
+#	test_D = [mu + 0.1*torch.randn(1,x_dim) for _ in range(n_inputs)]
+#	print("\nPosterior predictive for", test_D)
+#	print(vhe.sample(inputs={"c":test_D}).x)

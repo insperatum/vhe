@@ -141,6 +141,7 @@ class gated_resnet(nn.Module):
 
         if cond_blocks is not None:
             conditioning_block = cond_blocks[(x.size(2), x.size(3))]
+
             x += conditioning_block
 
         a, b = torch.chunk(x, 2, dim=1)
