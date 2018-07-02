@@ -43,7 +43,7 @@ parser.add_argument('-r', '--load_params', type=str, default=None,
 # model
 parser.add_argument('-q', '--nr_resnet', type=int, default=3,
                     help='Number of residual blocks per stage of the model')
-parser.add_argument('-n', '--nr_filters', type=int, default=10,
+parser.add_argument('-n', '--nr_filters', type=int, default=20,
                     help='Number of filters to use across the model. Higher = larger model.')
 parser.add_argument('-a', '--mode', type=str, default='softmax', choices=['logistic_mix', 'softmax', 'gaussian'])
 parser.add_argument('-m', '--nr_logistic_mix', type=int, default=None,
