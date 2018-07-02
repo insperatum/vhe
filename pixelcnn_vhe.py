@@ -41,7 +41,7 @@ parser.add_argument('-t', '--save_interval', type=int, default=10,
 parser.add_argument('-r', '--load_params', type=str, default=None,
                     help='Restore training from previous model checkpoint?')
 # model
-parser.add_argument('-q', '--nr_resnet', type=int, default=3,
+parser.add_argument('-q', '--nr_resnet', type=int, default=2,
                     help='Number of residual blocks per stage of the model')
 parser.add_argument('-n', '--nr_filters', type=int, default=15,
                     help='Number of filters to use across the model. Higher = larger model.')
