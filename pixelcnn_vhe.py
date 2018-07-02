@@ -463,8 +463,8 @@ scheduler = lr_scheduler.StepLR(optimiser, step_size=1, gamma=args.lr_decay)
 
 total_iter = 0
 for epoch in range(1,21):
-	#kl_factor = min((epoch-1)/args.anneal, 1) if args.anneal else 1
-	kl_factor = 1/(1+math.exp((1500-total_iter)/10)) if args.anneal else 1
+	kl_factor = min((epoch-1)/args.anneal, 1) if args.anneal else 1
+	#kl_factor = 1/(1+math.exp((1500-total_iter)/10)) if args.anneal else 1
 	#kl_factor = 0
 	print("kl_factor:", kl_factor)
 	batchnum = 0
