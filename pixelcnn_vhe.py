@@ -43,7 +43,7 @@ parser.add_argument('-r', '--load_params', type=str, default=None,
 # model
 parser.add_argument('-q', '--nr_resnet', type=int, default=3,
                     help='Number of residual blocks per stage of the model')
-parser.add_argument('-n', '--nr_filters', type=int, default=20,
+parser.add_argument('-n', '--nr_filters', type=int, default=10,
                     help='Number of filters to use across the model. Higher = larger model.')
 parser.add_argument('-a', '--mode', type=str, default='softmax', choices=['logistic_mix', 'softmax', 'gaussian'])
 parser.add_argument('-m', '--nr_logistic_mix', type=int, default=None,
@@ -462,7 +462,7 @@ optimiser = optim.Adam(vhe.parameters(), lr=1e-3)
 scheduler = lr_scheduler.StepLR(optimiser, step_size=1, gamma=args.lr_decay)
 
 total_iter = 0
-for epoch in range(1,21):
+for epoch in range(1,50):
 	kl_factor = min((epoch-1)/args.anneal, 1) if args.anneal else 1
 	#kl_factor = 1/(1+math.exp((1500-total_iter)/10)) if args.anneal else 1
 	#kl_factor = 0
