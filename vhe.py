@@ -66,6 +66,8 @@ class DataLoader():
         self.labels = {}     # For each label type, a LongTensor assigning elements to labels
         self.label_idxs = {} # For each label type, for each label, a list of indices
         for k,v in labels.items():
+            v = list(v)
+            if torch.is_tensor(v[0]): v = [x.item() for x in v]
             unique_oldlabels = list(set(v))
             map_label = {oldlabel:label for label, oldlabel in enumerate(unique_oldlabels)}
             self.labels[k] = torch.LongTensor([map_label[oldlabel] for oldlabel in v])
