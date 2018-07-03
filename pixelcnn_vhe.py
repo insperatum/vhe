@@ -41,9 +41,9 @@ parser.add_argument('-t', '--save_interval', type=int, default=10,
 parser.add_argument('-r', '--load_params', type=str, default=None,
                     help='Restore training from previous model checkpoint?')
 # model
-parser.add_argument('-q', '--nr_resnet', type=int, default=3,
+parser.add_argument('-q', '--nr_resnet', type=int, default=2,
                     help='Number of residual blocks per stage of the model')
-parser.add_argument('-n', '--nr_filters', type=int, default=80,
+parser.add_argument('-n', '--nr_filters', type=int, default=15,
                     help='Number of filters to use across the model. Higher = larger model.')
 parser.add_argument('-a', '--mode', type=str, default='softmax', choices=['logistic_mix', 'softmax', 'gaussian'])
 parser.add_argument('-m', '--nr_logistic_mix', type=int, default=None,
@@ -462,10 +462,11 @@ optimiser = optim.Adam(vhe.parameters(), lr=1e-3)
 scheduler = lr_scheduler.StepLR(optimiser, step_size=1, gamma=args.lr_decay)
 
 total_iter = 0
-for epoch in range(1,21):
-	#kl_factor = min((epoch-1)/args.anneal, 1) if args.anneal else 1
-	#kl_factor = 1/(1+math.exp((1500-total_iter)/10))
-	kl_factor = 0
+for epoch in range(1,50):
+	kl_factor = min((epoch-1)/args.anneal, 1)/20 if args.anneal else 1/20
+	print("WARNING: using 1/20th KL")
+	#kl_factor = 1/(1+math.exp((1500-total_iter)/10)) if args.anneal else 1
+	#kl_factor = 0
 	print("kl_factor:", kl_factor)
 	batchnum = 0
 	for batch in data_loader:
