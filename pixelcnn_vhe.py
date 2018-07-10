@@ -155,6 +155,13 @@ c_dim = 10 #28, 28
 h_dim = 10
 
 
+#add 0.05 std affine noise to:
+#[0,1,0]
+#[1,0,1] then use grid generator
+
+#do orthogonal transforms for data augmentation
+
+
 #a pixelcnn px
 class Px(nn.Module):
 	def __init__(self):
