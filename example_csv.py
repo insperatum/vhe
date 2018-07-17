@@ -12,6 +12,9 @@ from vhe import VHE, DataLoader, Factors, Result
 
 from regex_prior import RegexPrior
 
+batch_size = 200
+max_length = 15
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--train', type=str, choices=['qc','pc','px','vhe'])
 args = parser.parse_args()
@@ -26,7 +29,7 @@ regex_vocab = list(string.printable[:-4]) + \
 class Pc(nn.Module):
     def __init__(self):
         super().__init__()
-        self.net = RobustFill(input_vocabularies=[], target_vocabulary=regex_vocab)
+        self.net = RobustFill(input_vocabularies=[], target_vocabulary=regex_vocab, max_length=max_length)
 
     def forward(self, c=None):
         if c is None: c, score = self.net.sampleAndScore()
@@ -47,7 +50,7 @@ class Px(nn.Module):
 class Qc(nn.Module):
     def __init__(self):
         super().__init__()
-        self.net = RobustFill(input_vocabularies=[string.printable[:-4]], target_vocabulary=regex_vocab)
+        self.net = RobustFill(input_vocabularies=[string.printable[:-4]], target_vocabulary=regex_vocab, max_length=max_length)
 
     def forward(self, inputs, c=None):    
         if c is None: c, score = self.net.sampleAndScore(inputs)
@@ -69,8 +72,6 @@ if __name__ == "__main__":
 
 
     ######## Pretraining ########
-    batch_size = 500
-    max_length = 15
 
     def getInstance():
         """
