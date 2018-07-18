@@ -73,7 +73,7 @@ model = vhe.VHE(encoder, decoder)
 Create a `vhe.DataLoader` to sample data for training.
 
 ```python
-data_loader = DataLoader(data=data,
+data_loader = vhe.DataLoader(data=data,
         labels={"c":class_labels, # The class label for each element in data
                 "z":range(len(data))},  # A unique label for each element in data
         k_shot={"c":5, "z":1}, # Number of elements given to each encoder
