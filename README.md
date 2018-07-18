@@ -16,7 +16,8 @@ Thanks to [pixel-cnn-pp](https://github.com/pclucas14/pixel-cnn-pp) for the PyTo
 - The likelihood `p(x|c,z)` will be a Gaussian distribution, with parameters given by a linear neural network.
 - Encoders are `q(z|x)` and `q(c|D)`, where the support-set size is `|D|=5`
 
-Step 1. Define an `nn.Module` for each conditional distribution. Its _forward_ function should return a value with associated log probability, wrapped in a `vhe.Result`. Use `<var>=None` to indicate that the random variable should be sampled.
+## Step 1.
+Define an `nn.Module` for each conditional distribution. Its _forward_ function should return a value with associated log probability, wrapped in a `vhe.Result`. Use `<var>=None` to indicate that the random variable should be sampled.
 
 **TODO: is it easier to separate sample and score functions?**
 ```python
@@ -57,7 +58,8 @@ qc = Qc()
 qz = Qz()
 ```
 
-Step 2. Create a `vhe.VHE` module from the encoder and decoder modules. All variables use an isotroptic Gaussian prior by default, but may also be specified.
+## Step 2.
+Create a `vhe.VHE` module from the encoder and decoder modules. All variables use an isotroptic Gaussian prior by default, but may also be specified.
 
 **TODO: don't really need kwargs in vhe.Factors**
 ```python
@@ -67,7 +69,8 @@ model = vhe.VHE(encoder, decoder)
 # or: model = vhe.VHE(encoder, decoder, prior=vhe.Factors(...))
 ```
 
-Step 3. Create a `vhe.DataLoader` to sample data for training.
+## Step 3.
+Create a `vhe.DataLoader` to sample data for training.
 
 ```python
 data_loader = DataLoader(data=data,
@@ -77,7 +80,8 @@ data_loader = DataLoader(data=data,
         batch_size=batch_size)
 ```
 
-Step 4. Train using the variational lower bound `model.score(...)`
+## Step 4.
+Train using the variational lower bound `model.score(...)`
 
 ```python
 optimiser = optim.Adam(vhe.parameters(), lr=1e-3)
