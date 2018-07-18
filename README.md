@@ -5,18 +5,18 @@ This is a simple PyTorch implementation for training a _Variational Homoencoder_
 [The Variational Homoencoder:
 Learning to learn high capacity generative models from few examples](http://auai.org/uai2018/proceedings/papers/351.pdf)
 
-This code is written to be generic, so it should apply easily to different domains and network architectures. It also applies a very wide variety of generative model structures, including the hierarchical and factorial latent variable models shown in the paper. The code covers the stochastic subsampling of data used during training (Algorithm 1), as well as the reweighting of KL terms in the training objective. 
+This code is written to be generic, so it should apply easily to different domains and network architectures. It also extends easily to a variety of generative model structures, including the hierarchical and factorial latent variable models shown in the paper. The code covers the stochastic subsampling of data used during training (Algorithm 1), as well as the reweighting of KL terms in the training objective. 
 
 Thanks to [pixel-cnn-pp](https://github.com/pclucas14/pixel-cnn-pp) for the PyTorch PixelCNN++ implementation used in `pixelcnn_vhe.py`
 
 # How to use
-`example_czx.py` provides a toy example with implementation for a model where data are partitioned into classes.
+`example_czx.py` provides a toy example of a model where data are partitioned into classes.
 - Each class will get its own latent variable `c`, with a Gaussian prior
 - Each element will get its own latent variable `z`, with a Gaussian prior
 - The likelihood `p(x|c,z)` will be a Gaussian distribution, with parameters given by a linear neural network.
 - Encoders are `q(z|x)` and `q(c|D)`, where the support-set size is `|D|=5`
 
-Step 1. Define an `nn.Module` for each conditional distribution. Its _forward_ function should return a value and its associated log probability, wrapped in a `vhe.Result`. Use `<var>=None` to indicate that the random variable should be sampled.
+Step 1. Define an `nn.Module` for each conditional distribution. Its _forward_ function should return a value with associated log probability, wrapped in a `vhe.Result`. Use `<var>=None` to indicate that the random variable should be sampled.
 
 **TODO: is it easier to separate sample and score functions?**
 ```python
@@ -40,7 +40,7 @@ class Qc(nn.Module): # q(c|D)
     def __init__(self): ...
 
     def forward(self, inputs, c=None):    
-        # Inputs is a (batch * |D| * ...) size tensor, containing the support set D
+        # inputs is a (batch * |D| * ...) size tensor, containing the support set D
         ...
         return vhe.Result(c, log_prob)
 
@@ -48,7 +48,7 @@ class Qz(nn.Module): # q(z|x,c)
     def __init__(self): ...
 
     def forward(self, inputs, c, z=None):
-        # Inputs is a (batch * 1 * ...) size tensor, containing the input example X
+        # inputs is a (batch * 1 * ...) size tensor, containing the input example x
         ...
         return vhe.Result(z, log_prob)
         
@@ -57,13 +57,14 @@ qc = Qc()
 qz = Qz()
 ```
 
-Step 2. Create a `vhe.VHE` module from all of the conditional distributions. All variables use an isotroptic Gaussian prior by default.
+Step 2. Create a `vhe.VHE` module from the encoder and decoder modules. All variables use an isotroptic Gaussian prior by default, but may also be specified.
 
 **TODO: don't really need kwargs in vhe.Factors**
 ```python
 encoder = vhe.Factors(c=qc, z=qz)
 decoder = px
 model = vhe.VHE(encoder, decoder)
+# or: model = vhe.VHE(encoder, decoder, prior=vhe.Factors(...))
 ```
 
 Step 3. Create a `vhe.DataLoader` to sample data for training.
