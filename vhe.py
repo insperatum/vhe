@@ -216,7 +216,7 @@ class VHE(nn.Module):
         objective = lowerbound
         for k,v in sampled_reinforce_log_probs.items():
             downstream_kl = sum(kl_factor[k]*kl[k]/t.new(sizes[k]) for k2 in self.latents if k in self.encoder.dependencies[k2] or k2 == k)
-            objective += v * (ll - downstream_kl).exp().data
+            objective += v * (ll - downstream_kl).data
 
         if return_kl:
             return objective.mean(), KL(**{k:v.mean() for k,v in kl.items()})
