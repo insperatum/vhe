@@ -64,6 +64,9 @@ parser.add_argument('-an', '--anneal', type=int, default=None,
                     help='number of epochs to anneal')
 parser.add_argument('--debug', action='store_true',
                     help='if the number of batches is small')
+parser.add_argument('--ortho', dest='ortho_transforms', action='store_true')
+parser.add_argument('--affine', action='store_true')
+
 args = parser.parse_args()
 
 
@@ -438,7 +441,38 @@ if args.debug:
 else:
 	data_cutoff = None
 	data, class_labels = zip(*train_loader)
+
 data = torch.cat(data)
+
+if args.ortho_transforms:
+	import copy
+
+	class_labels_orig = class_labels
+	class_labels = []
+
+	print("applying ortho_transforms")
+	nTasks = len({int(i.numpy()) for i in class_labels_orig})
+	print("nTasks pre train:", nTasks)
+	#
+	data_list = []
+	i = 0
+	for flip in [1,-1]:
+		for theta in [0, math.pi/2, math.pi, 3*math.pi/2]:
+
+			trans = torch.Tensor([[math.cos(theta), flip*-math.sin(theta), 0], [math.sin(theta), flip*math.cos(theta), 0]]).view(1,2,3)
+			trans = trans.repeat(data.size(0),1,1)
+			grid = F.affine_grid(trans,data.size())
+			trans_data = F.grid_sample(data,grid)
+
+			data_list.append(trans_data)
+			#torchvision.utils.save_image(trans_data[0], "ortho_transform_{}.png".format(i), padding=5, pad_value=1)
+			class_labels.extend( [i*nTasks + label for label in class_labels_orig])
+			i += 1
+
+	data = torch.cat(data_list)
+
+
+
 print("dataset size", data.size())
 # Training
 batch_size = args.batch_size
@@ -458,8 +492,15 @@ print("test dataset size", test_data.size())
 test_data_loader = DataLoader(data=test_data, labels = {'c':test_class_labels, 'z':range(len(test_data))},
 		batch_size=batch_size, k_shot= {'c': n_inputs, 'z': 1} )
 
-############batch
 
+###sample 20 random affine transforms
+
+if args.affine:
+	id_trans = torch.Tensor([[1, 0, 0], [0, 1, 0]]).view(1,2,3)
+	id_trans = id_trans.repeat(data.size(0),1,1)
+
+
+############batch
 
 
 # Training
@@ -470,6 +511,8 @@ scheduler = lr_scheduler.StepLR(optimiser, step_size=1, gamma=args.lr_decay)
 
 total_iter = 0
 for epoch in range(1, args.max_epochs):
+
+
 	kl_factor = min((epoch-1)/args.anneal, 1)/20 if args.anneal else 1/20
 	print("WARNING: using 1/20th KL")
 	#kl_factor = 1/(1+math.exp((1500-total_iter)/10)) if args.anneal else 1
@@ -478,10 +521,11 @@ for epoch in range(1, args.max_epochs):
 	batchnum = 0
 	for batch in data_loader:
 		inputs = {k:v.cuda() for k,v in batch.inputs.items()}
-
+		print(*(v.size() for _,v in inputs.items()))
 		#sizes = {k:[item.cuda for item in v] for k,v in batch.sizes.items()}
 		sizes = batch.sizes
 		target = batch.target.cuda()
+		print(target.size())
 
 		optimiser.zero_grad()
 		score, kl = vhe.score(inputs=inputs, sizes=sizes, x=target, return_kl=True, kl_factor=kl_factor)
