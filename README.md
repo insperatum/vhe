@@ -70,7 +70,6 @@ class Qz(nn.Module): # q(z|x,c)
 ## Step 2.
 Create a `VHE` module from the encoder and decoder modules. All variables use an isotroptic Gaussian prior by default, but may also be specified.
 
-**TODO: don't really need kwargs in vhe.Factors**
 ```python
 model = VHE(encoder=[Qc(), Qz()], decoder=Px()) #Use default prior c,z ~ N(0, 1)
 # or: model = VHE(encoder=[Qc(), Qz()], decoder=Px(), prior=...)
