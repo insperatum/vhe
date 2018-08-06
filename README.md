@@ -1,5 +1,3 @@
-**(Note: Code and documentation under development, expect API changes)**
-
 # Variational Homoencoder
 This is a simple PyTorch implementation for training a _Variational Homoencoder_, as in the paper:\
 [The Variational Homoencoder:
