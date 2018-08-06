@@ -7,7 +7,7 @@ Learning to learn high capacity generative models from few examples](http://auai
 
 This code is written to be generic, so it should apply easily to different domains and network architectures. It also extends easily to a variety of generative model structures, including the hierarchical and factorial latent variable models shown in the paper. The code covers the stochastic subsampling of data used during training (Algorithm 1), as well as the reweighting of KL terms in the training objective. 
 
-Thanks to [pixel-cnn-pp](https://github.com/pclucas14/pixel-cnn-pp) for the PyTorch PixelCNN++ implementation used in `pixelcnn_vhe.py`
+Thanks to [pixel-cnn-pp](https://github.com/pclucas14/pixel-cnn-pp) for the PyTorch PixelCNN++ implementation used in `example_pixelcnn.py`
 
 Feel free to email me at [lbh@mit.edu](mailto:lbh@mit.edu) with any questions
 
