@@ -73,14 +73,14 @@ Create a `VHE` module from the encoder and decoder modules. All variables use an
 **TODO: don't really need kwargs in vhe.Factors**
 ```python
 model = VHE(encoder=[Qc(), Qz()], decoder=Px()) #Use default prior c,z ~ N(0, 1)
-# or: model = VHE(encoder=[Qc(), Qz()], decoder=Px(), ...)
+# or: model = VHE(encoder=[Qc(), Qz()], decoder=Px(), prior=...)
 ```
 
 ## Step 3.
-Create a `vhe.DataLoader` to sample data for training.
+Create a `DataLoader` to sample data for training.
 
 ```python
-data_loader = vhe.DataLoader(data=data,
+data_loader = DataLoader(data=data,
         labels={"c":class_labels, # The class label for each element in data
                 "z":range(len(data))},  # A unique label for each element in data
         k_shot={"c":5, "z":1}, # Number of elements given to each encoder
