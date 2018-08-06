@@ -8,6 +8,97 @@ import torch
 from torch import nn, distributions
 import numpy as np
 
+class VHE(nn.Module):
+    def __init__(self, encoder, decoder, prior=None):
+        """
+        encoder can be any of: nn.Module, list[nn.Module], dict(class_name -> nn.Module)
+        decoder is an nn.Module
+        prior defaults to Normal(0,1), or can be any of: nn.Module, list[nn.Module], dict(class_name -> nn.Module)
+        """
+        super(VHE, self).__init__()
+
+        self.encoder = asFactors(encoder)
+        self.decoder = createFactorFromModule(decoder)
+        if prior is None:
+            self.prior = Factors(**{k:NormalPrior() for k in self.encoder.variables})
+        else:
+            self.prior = asFactors(prior)
+            assert set(self.prior.variables) == set(self.encoder.variables)
+            
+        self.modules = nn.ModuleList(self.prior.modules + self.encoder.modules + [self.decoder.module])
+        self.observation = self.decoder.name 
+        self.latents = self.prior.variables 
+
+    def score(self, inputs, sizes, return_kl=False, kl_factor=1, **kwargs):
+        assert set(inputs.keys()) == set(self.latents)
+        assert set(sizes.keys()) == set(self.latents)
+        assert set(kwargs.keys()) == set([self.observation])
+        
+        if isinstance(kl_factor, numbers.Number): kl_factor = {k: kl_factor for k in self.latents}
+        else: kl_factor = {k: kl_factor.get(k, 1) for k in self.latents}
+            
+        # Sample from encoder
+        sampled_vars = {}
+        sampled_log_probs = {}
+        sampled_reinforce_log_probs = {}
+        for k, factor in self.encoder.factors.items():
+            result = factor(inputs=inputs[k], **sampled_vars)
+            #result = factor(inputs=inputs[k], **{k:v for k,v in sampled_vars.items() if k in factor.variables})
+            sampled_vars[k], sampled_log_probs[k] = result.value, result.log_prob
+            if result.reinforce_log_prob is not None: sampled_reinforce_log_probs[k] = result.reinforce_log_prob
+        sampled_vars[self.observation] = kwargs[self.observation]
+
+        # Score under prior
+        priors = {}
+        for k, factor in self.prior.factors.items():
+            args = {k2:v for k2,v in sampled_vars.items() if k2==k or k2 in factor.args}
+            priors[k] = factor(**args).log_prob
+
+        # KL Divergence
+        kl = {k:sampled_log_probs[k]-priors[k] for k in self.latents}
+
+        # Log likelihood
+        args = {k:v for k,v in sampled_vars.items() if k==self.decoder.name or k in self.decoder.args}
+        ll = self.decoder(**args).log_prob
+
+        # VHE Objective
+        t = ll
+        lowerbound = ll - sum(kl_factor[k]*kl[k]/t.new(sizes[k]) for k in self.latents) 
+
+        # Reinforce objective
+        objective = lowerbound
+        for k,v in sampled_reinforce_log_probs.items():
+            downstream_kl = sum(kl_factor[k]*kl[k]/t.new(sizes[k]) for k2 in self.latents if k in self.encoder.dependencies[k2] or k2 == k)
+            objective += v * (ll - downstream_kl).data
+
+        if return_kl:
+            return objective.mean(), KL(**{k:v.mean() for k,v in kl.items()})
+        else:
+            return objective.mean()
+
+    def sample(self, inputs=None, batch_size=None):
+        if inputs is None:
+            samplers = self.prior
+        else:
+            batch_size = len(list(inputs.values())[0]) #First latent 
+            samplers = {k:self.encoder.factors[k] if k in inputs else self.prior.factors[k] for k in self.latents}
+            samplers[self.observation] = self.decoder
+
+        sampled_vars = {}
+        try:
+            while len(samplers) > 0:
+                k = next(k for k,v in samplers.items() if v.args <= set(sampled_vars.keys()))
+                kwargs = {k2:sampled_vars[k2] for k2 in samplers[k].args}
+                if k in inputs: kwargs['inputs'] = inputs[k]
+                if len(kwargs)==0: kwargs['batch_size'] = batch_size
+                sampled_vars[k] = samplers[k](**kwargs).value
+                del samplers[k]
+        except StopIteration:
+            raise Exception("Can't find a valid sampling path")
+
+        return Vars(**sampled_vars)
+
+
 def assert_msg(condition, message):
     if not condition: raise Exception(message)
 
@@ -53,10 +144,11 @@ class Result:
         self.reinforce_log_prob = reinforce_log_prob
         self.log_prob = self.reparam_log_prob
         if self.reinforce_log_prob is not None: self.log_prob += self.reinforce_log_prob
-        
+
+
+VHEBatch = namedtuple("VHEBatch", ["inputs", "sizes", "target"])
 class DataLoader():
-    VHEBatch = namedtuple("VHEBatch", ["inputs", "sizes", "target"])
-    def __init__(self, data, batch_size, labels, k_shot):
+    def __init__(self, data, batch_size, labels, k_shot, transforms=[]):
         self.data = data
         self.mode = "tensor" if torch.is_tensor(data) else "list"
         if self.mode == "tensor":
@@ -78,6 +170,7 @@ class DataLoader():
                 self.label_idxs[k][j]=torch.LongTensor(self.label_idxs[k][j])
         self.batch_size = batch_size
         self.k_shot = k_shot
+        self.transforms = transforms
 
     def __iter__(self):
         self.next_i = 0
@@ -111,11 +204,58 @@ class DataLoader():
             elif self.mode == "list":
                 inputs[k] = [[_inputs[j][i] for j in range(self.k_shot[k])]
                         for i in range(len(_inputs[0]))]
-        return self.VHEBatch(target=x, inputs=inputs, sizes=sizes)
+
+        batch = VHEBatch(target=x, inputs=inputs, sizes=sizes)
+        for transform in self.transforms:
+            batch = transform.apply(batch)
+        return batch
+
+class Transform():
+    """
+    A set of transformations to apply to a dataset
+    Params:
+        f is the transform function: f(data, args)
+        args is a tensor containing possible transform arguments (so n_transforms = args.size(0))
+        share_labels is the list of latent labels that should be shared between x and the transformed version of x
+    """
+    def __init__(self, f, args, share_labels=None):
+        self.f = f
+        self.args = args
+        self.n_transforms = args.size(0)
+        self.share_labels = [] if share_labels is None else share_labels
+
+    def transform_tensor(self, t):
+        # First dim of t is batch
+        # Applies a random transform to every row of t
+        transform_idxs = t.new_tensor(t.size(0)).random_(0, self.n_transforms).long()
+        transform_args = t.index_select(0, transform_idxs)
+        return self.f(t, transform_args)
+
+    def apply(self, batch):
+        target = self.transform_tensor(batch.target)
+        inputs = {}
+        for k, D in batch.inputs.items():
+            if k in self.share_labels:
+                D_unrolled = D.reshape(D.size(0) * D.size(1), *D.size()[2:])
+                D_transformed = self.transform_tensor(D_unrolled)
+                inputs[k] = D_transformed.reshape(D.size(0), D.size(1), *D_transformed.size()[1:])
+            else:
+                inputs[k] = D
+        sizes = {k: [s*self.n_transforms for s in v] if k in self.share_labels else v
+                for k,v in batch.sizes.items()}
+        return VHEBatch(target=target, inputs=inputs, sizes=sizes)
+
+
+
 
 class Factor(namedtuple('Factor', ['module', 'name', 'args'])):
     def __call__(self, *args, **kwargs):
-        return self.module.forward(*args, **kwargs)
+        r = self.module.forward(*args, **kwargs)
+        if Result.__instancecheck__(r):
+            return r
+        else:
+            return Result(*r)
+
 
 def createFactorFromModule(module):
     assert 'forward' in dir(module)
@@ -126,8 +266,12 @@ def createFactorFromModule(module):
     return Factor(module, name, args)
     
 class Factors:
-    def __init__(self, **kwargs):
+    def __init__(self, *args, **kwargs):
         unordered_factors = []
+        for f in args:
+            factor = createFactorFromModule(f)
+            unordered_factors.append(factor)
+
         for name, f in kwargs.items():
             if isinstance(f, CustomDistribution):
                 factor = f.make(name)
@@ -154,92 +298,20 @@ class Factors:
         self.variables = list(self.factors.keys())
         self.modules = list(f.module for f in self.factors.values())
 
+def asFactors(f):
+    if Factors.__instancecheck__(f):
+        return f
+    elif dict.__instancecheck__(f):
+        return Factors(**f)
+    elif "__iter__" in dir(f):
+        return Factors(*f)
+    else:
+        return Factors(f)
+
 class Vars():
     def __init__(self, **kwargs):
         for k,v in kwargs.items():
             setattr(self, k, v)
+
 class KL(Vars):
     pass
-
-class VHE(nn.Module):
-    def __init__(self, encoder, decoder, prior=None):
-        super(VHE, self).__init__()
-        self.encoder = encoder
-        self.decoder = createFactorFromModule(decoder)
-        if prior is not None:
-            assert set(prior.variables) == set(encoder.variables)
-            self.prior = prior
-        else:
-            self.prior = Factors(**{k:NormalPrior() for k in encoder.variables})
-        self.modules = nn.ModuleList(self.prior.modules + self.encoder.modules + [self.decoder.module])
-    
-        self.observation = self.decoder.name 
-        self.latents = self.prior.variables 
-
-    def score(self, inputs, sizes, return_kl=False, kl_factor=1, **kwargs):
-        assert set(inputs.keys()) == set(self.latents)
-        assert set(sizes.keys()) == set(self.latents)
-        assert set(kwargs.keys()) == set([self.observation])
-        
-        if isinstance(kl_factor, numbers.Number): kl_factor = {k: kl_factor for k in self.latents}
-        else: kl_factor = {k: kl_factor.get(k, 1) for k in self.latents}
-            
-        # Sample from encoder
-        sampled_vars = {}
-        sampled_log_probs = {}
-        sampled_reinforce_log_probs = {}
-        for k, factor in self.encoder.factors.items():
-            result = factor(inputs=inputs[k], **sampled_vars)
-            #result = factor(inputs=inputs[k], **{k:v for k,v in sampled_vars.items() if k in factor.variables})
-            sampled_vars[k], sampled_log_probs[k] = result.value, result.log_prob
-            if result.reinforce_log_prob is not None: sampled_reinforce_log_probs[k] = result.reinforce_log_prob
-        sampled_vars[self.observation] = kwargs[self.observation]
-
-        # Score under prior
-        priors = {}
-        for k, factor in self.prior.factors.items():
-            args = {k2:v for k2,v in sampled_vars.items() if k2==k or k2 in factor.args}
-            priors[k] = factor(**args).log_prob
-
-        # KL Divergence
-        kl = {k:sampled_log_probs[k]-priors[k] for k in self.latents}
-
-        # Log likelihood
-        args = {k:v for k,v in sampled_vars.items() if k==self.decoder.name or k in self.decoder.args}
-        ll = self.decoder(**args).log_prob
-
-        # VHE Objective
-        t = ll
-        lowerbound = ll - sum(kl_factor[k]*kl[k]/t.new(sizes[k]) for k in self.latents) 
-
-        # Reinforce objective
-        objective = lowerbound
-        for k,v in sampled_reinforce_log_probs.items():
-            objective += v * (ll - sum(kl_factor[k]*kl[k]/t.new(sizes[k]) for k2 in self.latents if k in self.encoder.dependencies[k2] or k2 == k)).data
-
-        if return_kl:
-            return objective.mean(), KL(**{k:v.mean() for k,v in kl.items()})
-        else:
-            return objective.mean()
-
-    def sample(self, inputs=None, batch_size=None):
-        if inputs is None:
-            samplers = self.prior
-        else:
-            batch_size = len(list(inputs.values())[0]) #First latent 
-            samplers = {k:self.encoder.factors[k] if k in inputs else self.prior.factors[k] for k in self.latents}
-            samplers[self.observation] = self.decoder
-
-        sampled_vars = {}
-        try:
-            while len(samplers) > 0:
-                k = next(k for k,v in samplers.items() if v.args <= set(sampled_vars.keys()))
-                kwargs = {k2:sampled_vars[k2] for k2 in samplers[k].args}
-                if k in inputs: kwargs['inputs'] = inputs[k]
-                if len(kwargs)==0: kwargs['batch_size'] = batch_size
-                sampled_vars[k] = samplers[k](**kwargs).value
-                del samplers[k]
-        except StopIteration:
-            raise Exception("Can't find a valid sampling path")
-
-        return Vars(**sampled_vars)
