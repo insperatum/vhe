@@ -19,10 +19,12 @@ class VHE(nn.Module):
 
         self.encoder = asFactors(encoder)
         self.decoder = createFactorFromModule(decoder)
+
+        defaults = {k:NormalPrior() for k in self.encoder.variables}
         if prior is None:
-            self.prior = Factors(**{k:NormalPrior() for k in self.encoder.variables})
+            self.prior = Factors(**defaults)
         else:
-            self.prior = asFactors(prior)
+            self.prior = asFactors(prior, defaults=defaults)
             assert set(self.prior.variables) == set(self.encoder.variables)
             
         self.modules = nn.ModuleList(self.prior.modules + self.encoder.modules + [self.decoder.module])
@@ -43,7 +45,6 @@ class VHE(nn.Module):
         sampled_reinforce_log_probs = {}
         for k, factor in self.encoder.factors.items():
             result = factor(inputs=inputs[k], **sampled_vars)
-            #result = factor(inputs=inputs[k], **{k:v for k,v in sampled_vars.items() if k in factor.variables})
             sampled_vars[k], sampled_log_probs[k] = result.value, result.log_prob
             if result.reinforce_log_prob is not None: sampled_reinforce_log_probs[k] = result.reinforce_log_prob
         sampled_vars[self.observation] = kwargs[self.observation]
@@ -274,12 +275,13 @@ class Factors:
             unordered_factors.append(factor)
 
         for name, f in kwargs.items():
-            if isinstance(f, CustomDistribution):
-                factor = f.make(name)
-            else:
-                factor = createFactorFromModule(f)
-                assert factor.name == name 
-            unordered_factors.append(factor)
+            if not any(f.name == name for f in unordered_factors):
+                if isinstance(f, CustomDistribution):
+                    factor = f.make(name)
+                else:
+                    factor = createFactorFromModule(f)
+                    assert factor.name == name 
+                unordered_factors.append(factor)
 
         factors = OrderedDict()
         dependencies = {}
@@ -299,15 +301,16 @@ class Factors:
         self.variables = list(self.factors.keys())
         self.modules = list(f.module for f in self.factors.values())
 
-def asFactors(f):
+def asFactors(f, defaults={}):
     if Factors.__instancecheck__(f):
         return f
     elif dict.__instancecheck__(f):
-        return Factors(**f)
+        kwargs = {k:v for k,v in defaults.items() + f.items()}
+        return Factors(**kwargs)
     elif "__iter__" in dir(f):
-        return Factors(*f)
+        return Factors(*f, **defaults)
     else:
-        return Factors(f)
+        return Factors(f, **defaults)
 
 class Vars():
     def __init__(self, **kwargs):
