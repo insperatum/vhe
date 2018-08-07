@@ -1,0 +1,3 @@
+#!/bin/bash
+ln -s ../../envs
+ln -s ../../data
