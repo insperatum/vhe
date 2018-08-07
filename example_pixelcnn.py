@@ -413,7 +413,7 @@ if __name__ == '__main__':
 			(-score).backward() 
 			optimiser.step()
 			batchnum += 1
-			print("Batch %d Score %3.3f KLc %3.3f KLz %3.3f" % (batchnum, score.item(), kl.c.item(), kl.z.item()))
+			print("Batch %d Score %3.3f KLc %3.3f KLz %3.3f" % (batchnum, score.item(), kl.c.item(), kl.z.item()),flush=True)
 			total_iter = total_iter + 1
 		print("---Epoch %d Score %3.3f KLc %3.3f KLz %3.3f" % (epoch, score.item(), kl.c.item(), kl.z.item()))
 
