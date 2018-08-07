@@ -227,8 +227,9 @@ class Transform():
     def transform_tensor(self, t):
         # First dim of t is batch
         # Applies a random transform to every row of t
-        transform_idxs = t.new_tensor(t.size(0)).random_(0, self.n_transforms).long()
-        transform_args = t.index_select(0, transform_idxs)
+        transform_idxs = t.new_zeros(t.size(0)).random_(0, self.n_transforms).long()
+        transform_args = self.args.index_select(0, transform_idxs)
+
         return self.f(t, transform_args)
 
     def apply(self, batch):
