@@ -11,6 +11,8 @@ Feel free to email me at [lbh@mit.edu](mailto:lbh@mit.edu) with any questions
 
 <img src="https://raw.githubusercontent.com/insperatum/vhe/master/vhe.png" width="500">
 
+_Variational Homoencoder for class-structured datasets_
+
 # PixelCNN model
 `example_pixelcnn.py` trains a Variational Homoencoder on omniglot using a hierarchical pixelcnn architecture:
 
