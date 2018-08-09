@@ -357,7 +357,7 @@ if __name__ == '__main__':
 	small_grids = []
 	for _ in range(20):
 		
-		trans = torch.Tensor([[1,0,0],[0,1,0] ]).view(1,2,3) + torch.randn(1,2,3)*0.05
+		trans = torch.Tensor([[1,0,0],[0,1,0] ]).view(1,2,3) #+ torch.randn(1,2,3)*0.05
 		trans = trans.repeat(1,1,1)
 		grid = F.affine_grid(trans, torch.Size([1,1,28,28]))
 		small_grids.append( grid ) 
@@ -399,9 +399,11 @@ if __name__ == '__main__':
 
 	total_iter = 0
 	for epoch in range(1, args.max_epochs):
-		kl_factor = min((epoch-1)/args.anneal, 1) if args.anneal else 1
+
+		kl_factor = min((epoch-1)/args.anneal, 1)/20 if args.anneal else 1/20
 		
 		print("kl_factor:", kl_factor)
+		print("WARNING: using 1/20th KL")
 		batchnum = 0
 		for batch in data_loader:
 			inputs = {k:v.cuda() for k,v in batch.inputs.items()}
