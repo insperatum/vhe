@@ -407,7 +407,6 @@ if __name__ == '__main__':
 		for batch in data_loader:
 			inputs = {k:v.cuda() for k,v in batch.inputs.items()}
 			sizes = batch.sizes
-			print(sizes)
 			target = batch.target.cuda()
 
 			optimiser.zero_grad()
