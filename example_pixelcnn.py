@@ -400,10 +400,9 @@ if __name__ == '__main__':
 	total_iter = 0
 	for epoch in range(1, args.max_epochs):
 
-		kl_factor = min((epoch-1)/args.anneal, 1)/20 if args.anneal else 1/20
+		kl_factor = min((epoch-1)/args.anneal, 1) if args.anneal else 1
 		
 		print("kl_factor:", kl_factor)
-		print("WARNING: using 1/20th KL")
 		batchnum = 0
 		for batch in data_loader:
 			inputs = {k:v.cuda() for k,v in batch.inputs.items()}
