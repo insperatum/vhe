@@ -370,7 +370,7 @@ if __name__ == '__main__':
 	transform_ortho_affine = Transform(F.grid_sample, ortho_grids, share_labels=None)
 
 	data_loader = DataLoader(data=data, labels = {'c':class_labels, 'z':range(len(data))},
-			batch_size=batch_size, k_shot= {'c': n_inputs, 'z': 1}, transforms=[transform_small_affine, transform_ortho_affine])
+			batch_size=batch_size, k_shot= {'c': n_inputs, 'z': 1}, transforms=[transform_small_affine]) #, transform_ortho_affine])
 
 	#training data:
 	if data_cutoff is not None:
