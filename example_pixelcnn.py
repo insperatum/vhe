@@ -23,7 +23,7 @@ from torch import nn, optim
 from torch.distributions.normal import Normal
 import math
 
-from vhe import VHE, DataLoader, Factors, Result, NormalPrior, Transform
+from vhe import VHE, DataLoader, Transform
 
 #######pixelcnn options #########
 parser = argparse.ArgumentParser()
@@ -103,13 +103,7 @@ elif args.mode == "gaussian":
 
 #######end pixelcnn options #########
 
-
-
-
-x_dim = 5
 c_dim = 10 
-h_dim = 10
-
 
 class Px(nn.Module):
 	def __init__(self):
@@ -175,12 +169,11 @@ class Px(nn.Module):
 				
 
 		if x is None: 
-
 			x, dist = self.sample(self.model, cond_blocks=cond_blocks)
-			return Result(x, -self.loss_op(x, dist))
+			return x, -self.loss_op(x, dist)
 		else:
 
-			return Result(x, -self.loss_op(x, self.model(x, cond_blocks=cond_blocks, sample=False)))
+			return x, -self.loss_op(x, self.model(x, cond_blocks=cond_blocks, sample=False))
 
 class Qc_stn(nn.Module):
 	def __init__(self):
@@ -239,7 +232,7 @@ class Qc_stn(nn.Module):
 		sigma = self.conv_sigma(emb)
 		dist = Normal(mu, sigma)
 		if c is None: c = dist.rsample()
-		return Result(c, dist.log_prob(c).sum(dim=1).sum(dim=1).sum(dim=1))
+		return c, dist.log_prob(c).sum(dim=1).sum(dim=1).sum(dim=1)
 
 
 class Qz(nn.Module):
@@ -272,7 +265,7 @@ class Qz(nn.Module):
 		if z is None: 
 			z = dist.rsample()
 		score = dist.log_prob(z).sum(dim=1).sum(dim=1).sum(dim=1)
-		return Result(z, score) 
+		return z, score
 
 class Pc(nn.Module):
 	def __init__(self):
@@ -304,17 +297,15 @@ class Pc(nn.Module):
 	def forward(self, c=None):
 		if c is None: 
 			c, dist = self.sample(self.model)
-			return Result(c, -self.loss_op(c, dist))
+			return c, -self.loss_op(c, dist)
 		else:
-			return Result(c, -self.loss_op(c, self.model(c, sample=False)))
+			return c, -self.loss_op(c, self.model(c, sample=False))
 
 
 if __name__ == '__main__':
-
-	prior = Factors(c=Pc(), z=NormalPrior())
-	encoder = Factors(c=Qc_stn(), z=Qz())
-	decoder = Px()
-	vhe = VHE(encoder, decoder, prior=prior)
+	vhe = VHE(encoder=[Qc_stn(), Qz()],
+		  decoder=Px(),
+		  prior=[Pc()])
 	vhe = vhe.cuda()
 	print("created vhe")
 	print("number of parameters is", sum(p.numel() for p in vhe.parameters() if p.requires_grad))

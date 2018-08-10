@@ -9,6 +9,15 @@ Thanks to [pixel-cnn-pp](https://github.com/pclucas14/pixel-cnn-pp) for the PyTo
 
 Feel free to email me at [lbh@mit.edu](mailto:lbh@mit.edu) with any questions
 
+<img src="https://raw.githubusercontent.com/insperatum/vhe/master/vhe.png" width="500">
+
+_Variational Homoencoder for class-structured datasets_
+
+# PixelCNN model
+`example_pixelcnn.py` trains a Variational Homoencoder on omniglot using a hierarchical pixelcnn architecture:
+
+<img src="https://raw.githubusercontent.com/insperatum/vhe/master/pixelcnnarchitecture.png" width="200">
+
 # How to use
 `example_czx.py` provides a toy example of a model where data are partitioned into classes.
 - Each class will get its own latent variable `c`, with a Gaussian prior
