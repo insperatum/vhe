@@ -338,7 +338,7 @@ if __name__ == '__main__':
 
 
 	batch_size = args.batch_size
-	n_inputs = 3
+	n_inputs = 2
 
 
 	ortho_grids = []
@@ -361,7 +361,7 @@ if __name__ == '__main__':
 		trans = trans.repeat(1,1,1)
 		grid = F.affine_grid(trans, torch.Size([1,1,28,28]))
 		small_grids.append( grid ) 
-	small_grids = torch.cat(small_grids,0)
+	small_grids = torch.cat(small_grids, 0)
 
 
 
@@ -399,6 +399,7 @@ if __name__ == '__main__':
 
 	total_iter = 0
 	for epoch in range(1, args.max_epochs):
+
 		kl_factor = min((epoch-1)/args.anneal, 1) if args.anneal else 1
 		
 		print("kl_factor:", kl_factor)
@@ -413,7 +414,7 @@ if __name__ == '__main__':
 			(-score).backward() 
 			optimiser.step()
 			batchnum += 1
-			print("Batch %d Score %3.3f KLc %3.3f KLz %3.3f" % (batchnum, score.item(), kl.c.item(), kl.z.item()))
+			print("Batch %d Score %3.3f KLc %3.3f KLz %3.3f" % (batchnum, score.item(), kl.c.item(), kl.z.item()),flush=True)
 			total_iter = total_iter + 1
 		print("---Epoch %d Score %3.3f KLc %3.3f KLz %3.3f" % (epoch, score.item(), kl.c.item(), kl.z.item()))
 
