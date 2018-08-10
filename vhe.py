@@ -239,13 +239,13 @@ class Transform():
         for k, D in batch.inputs.items():
             if k in self.share_labels:
                 D_unrolled = D.reshape(D.size(0) * D.size(1), *D.size()[2:])
-                D_transformed = self.transform_tensor(D_unrolled)
+                D_transformed, _ = self.transform_tensor(D_unrolled)
                 inputs[k] = D_transformed.reshape(D.size(0), D.size(1), *D_transformed.size()[1:])
             else:
                 inputs[k] = torch.zeros(D.size())
                 #apply the exact same transform to each row of D that was applied to target
                 for i in range(D.size(1)):
-                    inputs[k][:,i] = self.f(D, transform_args)
+                    inputs[k][:,i] = self.f(D[:,i], transform_args)
         sizes = {k: [s*self.n_transforms for s in v] if k in self.share_labels else v
                 for k,v in batch.sizes.items()}
         return VHEBatch(target=target, inputs=inputs, sizes=sizes)

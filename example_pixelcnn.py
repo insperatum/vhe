@@ -405,7 +405,6 @@ if __name__ == '__main__':
 		print("kl_factor:", kl_factor)
 		batchnum = 0
 		for batch in data_loader:
-			assert False
 			inputs = {k:v.cuda() for k,v in batch.inputs.items()}
 			sizes = batch.sizes
 			target = batch.target.cuda()
