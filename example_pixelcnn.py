@@ -361,7 +361,7 @@ if __name__ == '__main__':
 		trans = trans.repeat(1,1,1)
 		grid = F.affine_grid(trans, torch.Size([1,1,28,28]))
 		small_grids.append( grid ) 
-	small_grids = torch.cat(small_grids,0)
+	small_grids = torch.cat(small_grids, 0)
 
 
 
@@ -370,7 +370,7 @@ if __name__ == '__main__':
 	transform_ortho_affine = Transform(F.grid_sample, ortho_grids, share_labels=None)
 
 	data_loader = DataLoader(data=data, labels = {'c':class_labels, 'z':range(len(data))},
-			batch_size=batch_size, k_shot= {'c': n_inputs, 'z': 1}, transforms=[transform_small_affine]) #, transform_ortho_affine])
+			batch_size=batch_size, k_shot= {'c': n_inputs, 'z': 1}, transforms=[transform_small_affine, transform_ortho_affine])
 
 	#training data:
 	if data_cutoff is not None:
@@ -405,6 +405,7 @@ if __name__ == '__main__':
 		print("kl_factor:", kl_factor)
 		batchnum = 0
 		for batch in data_loader:
+			assert False
 			inputs = {k:v.cuda() for k,v in batch.inputs.items()}
 			sizes = batch.sizes
 			target = batch.target.cuda()
