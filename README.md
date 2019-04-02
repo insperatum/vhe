@@ -3,6 +3,8 @@ This is a simple PyTorch implementation for training a _Variational Homoencoder_
 [The Variational Homoencoder:
 Learning to learn high capacity generative models from few examples](http://auai.org/uai2018/proceedings/papers/351.pdf)
 
+Watch the oral presentation [here](https://www.youtube.com/watch?v=qsi2YzCb8ps) (UAI 2018)
+
 This code is written to be generic, so it should apply easily to different domains and network architectures. It also extends easily to a variety of generative model structures, including the hierarchical and factorial latent variable models shown in the paper. The code covers the stochastic subsampling of data used during training (Algorithm 1), as well as the reweighting of KL terms in the training objective. 
 
 Thanks to [pixel-cnn-pp](https://github.com/pclucas14/pixel-cnn-pp) for the PyTorch PixelCNN++ implementation used in `example_pixelcnn.py`
