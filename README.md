@@ -1,3 +1,7 @@
+**Warning: This repo is no longer maintained!** 
+
+Users have reported issues with modern versions of PyTorch. We advise that readers refer to `vhe.py` only as a way to understand the structure of the model.
+
 # Variational Homoencoder
 This is a simple PyTorch implementation for training a _Variational Homoencoder_, as in the paper:\
 [The Variational Homoencoder:
@@ -7,18 +11,11 @@ Watch the oral presentation [here](https://www.youtube.com/watch?v=qsi2YzCb8ps) 
 
 This code is written to be generic, so it should apply easily to different domains and network architectures. It also extends easily to a variety of generative model structures, including the hierarchical and factorial latent variable models shown in the paper. The code covers the stochastic subsampling of data used during training (Algorithm 1), as well as the reweighting of KL terms in the training objective. 
 
-Thanks to [pixel-cnn-pp](https://github.com/pclucas14/pixel-cnn-pp) for the PyTorch PixelCNN++ implementation used in `example_pixelcnn.py`
-
 Feel free to email me at [lbh@mit.edu](mailto:lbh@mit.edu) with any questions
 
 <img src="https://raw.githubusercontent.com/insperatum/vhe/master/vhe.png" width="500">
 
 _Variational Homoencoder for class-structured datasets_
-
-# PixelCNN model
-`example_pixelcnn.py` trains a Variational Homoencoder on omniglot using a hierarchical pixelcnn architecture:
-
-<img src="https://raw.githubusercontent.com/insperatum/vhe/master/pixelcnnarchitecture.png" width="200">
 
 # How to use
 `example_czx.py` provides a toy example of a model where data are partitioned into classes.
